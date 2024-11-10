@@ -16,7 +16,7 @@ pub const MAX_PLAYERS: usize = 6;
 pub enum GameError {
     NameAlreadyExists,
     NotEnoughPlayers,
-    TooManyPlayers
+    TooManyPlayers,
 }
 
 pub struct RoomCommander {
@@ -24,7 +24,10 @@ pub struct RoomCommander {
 }
 
 impl RoomCommander {
-    pub async fn new_player(&self, name: String) -> Result<(PlayerId, UnboundedReceiver<RoomEvent>), GameError> {
+    pub async fn new_player(
+        &self,
+        name: String,
+    ) -> Result<(PlayerId, UnboundedReceiver<RoomEvent>), GameError> {
         let (cmd_tx, cmd_rx) = oneshot::channel();
         self.tx_channel
             .send(RoomCommand::AddPlayer { name, cmd_tx })
@@ -44,7 +47,7 @@ impl RoomCommander {
             .send(RoomCommand::StartGame { cmd_tx })
             .unwrap();
         cmd_rx.await.unwrap()
-    }    
+    }
 }
 
 pub struct Player {
@@ -86,21 +89,34 @@ impl RoomServer {
                     let _ = cmd_tx.send(());
                 }
                 RoomCommand::StartGame { cmd_tx } => {
-                    if self.players.len() < MIN_PLAYERS {
-                        let _ = cmd_tx.send(Err(GameError::NotEnoughPlayers));
-                    }
+                    let res = self.start_game();
+                    let _ = cmd_tx.send(res);
                 }
             }
         }
     }
 
-    fn new_player(&mut self, name: PlayerName) -> Result<(PlayerId, UnboundedReceiver<RoomEvent>),GameError> {
+    fn start_game(&mut self) -> Result<(), GameError> {
+        if self.players.len() < MIN_PLAYERS {
+            return Err(GameError::NotEnoughPlayers);
+        }
+        let event = RoomEvent::GameStarted;
+        self.send_all_players(event);
 
+        let event = RoomEvent::PlayerTurn(*self.players.keys().last().unwrap());
+        self.send_all_players(event);
+        Ok(())
+    }
+
+    fn new_player(
+        &mut self,
+        name: PlayerName,
+    ) -> Result<(PlayerId, UnboundedReceiver<RoomEvent>), GameError> {
         if self.players.len() >= MAX_PLAYERS {
             return Err(GameError::TooManyPlayers);
         }
 
-        if self.players.iter().any(|(_, player)| player.name == name ) {
+        if self.players.iter().any(|(_, player)| player.name == name) {
             return Err(GameError::NameAlreadyExists);
         }
 
@@ -154,20 +170,22 @@ pub enum RoomEvent {
         player_name: PlayerName,
     },
     PlayerLeft(PlayerId),
+    GameStarted,
+    PlayerTurn(PlayerId),
 }
 
 pub enum RoomCommand {
     AddPlayer {
         name: PlayerName,
-        cmd_tx: oneshot::Sender<Result<(PlayerId, UnboundedReceiver<RoomEvent>),GameError>>,
+        cmd_tx: oneshot::Sender<Result<(PlayerId, UnboundedReceiver<RoomEvent>), GameError>>,
     },
     RemovePlayer {
         id: PlayerId,
         cmd_tx: oneshot::Sender<()>,
     },
     StartGame {
-        cmd_tx: oneshot::Sender<Result<(),GameError>>,
-    }
+        cmd_tx: oneshot::Sender<Result<(), GameError>>,
+    },
 }
 
 #[cfg(test)]
@@ -176,26 +194,23 @@ mod tests {
 
     #[tokio::test]
     async fn new_player() {
-        let room_commander = RoomServer::new();
-        let player_name = "name1";
-        let (player_id, player_receiver) = room_commander.new_player(player_name.into()).await.unwrap();
+        let mut room_commander = RoomServer::new();
+        let mut players = create_n_players(&mut room_commander, 1, false).await;
 
-        let received_event = get_nth_event(player_receiver, 1).await;
+        let received_event = get_nth_event(&mut players[0].1, 1).await;
         assert!(
-            matches!(received_event, RoomEvent::PlayerJoined { room_id: _, player_id: received_player_id, player_name: received_player_name} if received_player_id==player_id && received_player_name==player_name)
+            matches!(received_event, RoomEvent::PlayerJoined { room_id: _, player_id: received_player_id, player_name: received_player_name} if received_player_id==players[0].0 && received_player_name=="name_0")
         );
     }
 
     #[tokio::test]
     async fn new_player_previous_player_should_receive_the_join_event() {
-        let room_commander = RoomServer::new();
-        let (player_name_1, player_name_2) = ("name1", "name2");
-        let (_, player_receiver_1) = room_commander.new_player(player_name_1.into()).await.unwrap();
-        let (player_id_2, _) = room_commander.new_player(player_name_2.into()).await.unwrap();
+        let mut room_commander = RoomServer::new();
+        let mut players = create_n_players(&mut room_commander, 2, false).await;
 
-        let received_event = get_nth_event(player_receiver_1, 2).await;
+        let received_event = get_nth_event(&mut players[0].1, 2).await;
         assert!(
-            matches!(received_event, RoomEvent::PlayerJoined { room_id: _, player_id: received_player_id, player_name: received_player_name} if received_player_id==player_id_2 && received_player_name==player_name_2)
+            matches!(received_event, RoomEvent::PlayerJoined { room_id: _, player_id: received_player_id, player_name: received_player_name} if received_player_id==players[1].0 && received_player_name=="name_1")
         );
     }
 
@@ -203,7 +218,10 @@ mod tests {
     async fn new_player_should_fail_when_name_exists() {
         let room_commander = RoomServer::new();
         let (player_name_1, player_name_2) = ("name1", "name1");
-        let _ = room_commander.new_player(player_name_1.into()).await.unwrap();
+        let _ = room_commander
+            .new_player(player_name_1.into())
+            .await
+            .unwrap();
         let res = room_commander.new_player(player_name_2.into()).await;
 
         assert!(matches!(res, Err(GameError::NameAlreadyExists)));
@@ -212,51 +230,81 @@ mod tests {
     #[tokio::test]
     async fn new_player_should_fail_when_there_are_too_many_players() {
         let mut room_commander = RoomServer::new();
-        create_n_players(&mut room_commander, 6).await;
-        let res = room_commander.new_player("player6".into()).await;
+        create_n_players(&mut room_commander, 6, false).await;
+        let res = room_commander.new_player("name_7".into()).await;
 
         assert!(matches!(res, Err(GameError::TooManyPlayers)));
     }
 
-
     #[tokio::test]
     async fn remove_player() {
-        let room_commander = RoomServer::new();
-        let (player_name_1, player_name_2, player_name_3) = ("name1", "name2", "name3");
-        let (_, player_receiver_1) = room_commander.new_player(player_name_1.into()).await.unwrap();
-        let (_, player_receiver_2) = room_commander.new_player(player_name_2.into()).await.unwrap();
-        let (player_id_3, _) = room_commander.new_player(player_name_3.into()).await.unwrap();
-        room_commander.remove_player(player_id_3).await;
+        let mut room_commander: RoomCommander = RoomServer::new();
+        let mut players = create_n_players(&mut room_commander, 3, false).await;
+        room_commander.remove_player(players[2].0).await;
 
-        let received_event = get_nth_event(player_receiver_1, 4).await;
+        let received_event = get_nth_event(&mut players[0].1, 4).await;
         assert!(
-            matches!(received_event, RoomEvent::PlayerLeft(received_player_id) if received_player_id == player_id_3)
+            matches!(received_event, RoomEvent::PlayerLeft(received_player_id) if received_player_id == players[2].0)
         );
 
-        let received_event = get_nth_event(player_receiver_2, 3).await;
+        let received_event = get_nth_event(&mut players[1].1, 3).await;
         assert!(
-            matches!(received_event, RoomEvent::PlayerLeft(received_player_id) if received_player_id == player_id_3)
+            matches!(received_event, RoomEvent::PlayerLeft(received_player_id) if received_player_id == players[2].0)
         );
     }
 
     #[tokio::test]
     async fn start_game_should_fail_when_not_enough_players() {
         let mut room_commander = RoomServer::new();
-        create_n_players(&mut room_commander, 1).await;
-        assert!(matches!(room_commander.start_game().await, Err(GameError::NotEnoughPlayers)));
+        create_n_players(&mut room_commander, 1, false).await;
+        assert!(matches!(
+            room_commander.start_game().await,
+            Err(GameError::NotEnoughPlayers)
+        ));
     }
 
-    async fn get_nth_event(mut rcv: UnboundedReceiver<RoomEvent>, nth: u8) -> RoomEvent {
-        for _ in 1..nth {
-            rcv.recv().await.unwrap();
+    #[tokio::test]
+    async fn start_game() {
+        let mut room_commander = RoomServer::new();
+        let mut players = create_n_players(&mut room_commander, 6, true).await;
+        room_commander.start_game().await.unwrap();
+
+        let players_ids: Vec<PlayerId> = players.iter().map(|(id, _)| *id).collect();
+        for (_, player_rx) in players.iter_mut() {
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::GameStarted));
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(
+                matches!(received_event, RoomEvent::PlayerTurn(id) if players_ids.contains(&id))
+            );
         }
-        rcv.recv().await.unwrap()
     }
 
-    async fn create_n_players(room_commander: &mut RoomCommander, n: u8) -> Vec<(PlayerId, UnboundedReceiver<RoomEvent>)> {
+    async fn get_nth_event(rcv: &mut UnboundedReceiver<RoomEvent>, nth: u8) -> RoomEvent {
+        for _ in 1..nth {
+            rcv.try_recv().unwrap();
+        }
+        rcv.try_recv().unwrap()
+    }
+
+    async fn create_n_players(
+        room_commander: &mut RoomCommander,
+        n: u8,
+        consume_events: bool,
+    ) -> Vec<(PlayerId, UnboundedReceiver<RoomEvent>)> {
         let mut players = vec![];
         for i in 0..n {
-            players.push(room_commander.new_player(format!("name_{i}")).await.unwrap());
+            players.push(
+                room_commander
+                    .new_player(format!("name_{i}"))
+                    .await
+                    .unwrap(),
+            );
+        }
+        if consume_events {
+            players
+                .iter_mut()
+                .for_each(|(_, rx)| while rx.try_recv().is_ok() {});
         }
         players
     }
