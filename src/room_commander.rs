@@ -40,11 +40,11 @@ impl RoomCommander {
             .unwrap();
         cmd_rx.await.unwrap()
     }
-    pub async fn set_player_ready(&self, id: PlayerId) {
+    pub async fn set_player_ready(&self, id: PlayerId) -> Result<(), GameError> {
         let (cmd_tx, cmd_rx) = oneshot::channel();
         self.tx_channel
             .send(RoomCommand::SetPlayerReady { id, cmd_tx })
             .unwrap();
-        cmd_rx.await.unwrap();
+        cmd_rx.await.unwrap()
     }
 }

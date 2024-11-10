@@ -32,7 +32,7 @@ pub enum RoomCommand {
     },
     SetPlayerReady {
         id: PlayerId,
-        cmd_tx: oneshot::Sender<()>,
+        cmd_tx: oneshot::Sender<Result<(), GameError>>,
     },
     NextTurn,
 }
@@ -111,8 +111,8 @@ impl RoomServer {
                     let _ = cmd_tx.send(res);
                 }
                 RoomCommand::SetPlayerReady { id, cmd_tx } => {
-                    self.set_player_ready(id);
-                    let _ = cmd_tx.send(());
+                    let res = self.set_player_ready(id);
+                    let _ = cmd_tx.send(res);
                 }
                 RoomCommand::NextTurn => self.next_turn(),
             }
@@ -121,7 +121,7 @@ impl RoomServer {
 
     fn start_game(&mut self) -> Result<(), GameError> {
         if self.state != State::NotStarted {
-            return Err(GameError::CannotStartTheGameFromCurrentState);
+            return Err(GameError::OperationNotAllowedAtCurrentState);
         }
 
         if self.players.len() < MIN_PLAYERS {
@@ -157,7 +157,7 @@ impl RoomServer {
         name: PlayerName,
     ) -> Result<(PlayerId, UnboundedReceiver<RoomEvent>), GameError> {
         if self.state != State::NotStarted {
-            return Err(GameError::CannotAddNewPlayers);
+            return Err(GameError::OperationNotAllowedAtCurrentState);
         }
 
         if self.players.len() >= MAX_PLAYERS {
@@ -201,7 +201,12 @@ impl RoomServer {
         self.send_all_players(event);
     }
 
-    fn set_player_ready(&mut self, id: PlayerId) {
+    fn set_player_ready(&mut self, id: PlayerId) -> Result<(), GameError>  {
+
+        if self.state != State::PeekingPhase {
+            return Err(GameError::OperationNotAllowedAtCurrentState);
+        }
+
         let player = self.players.get_mut(&id).unwrap();
         player.ready = true;
         let event = RoomEvent::PlayerIsReady(id);
@@ -209,6 +214,7 @@ impl RoomServer {
         if self.players.iter().all(|(_, player)| player.ready) {
             let _ = self.tx_channel.send(RoomCommand::NextTurn);
         }
+        Ok(())
     }
 
     fn next_turn(&mut self) {
@@ -336,7 +342,7 @@ mod tests {
         room_commander.start_game().await.unwrap();
         assert!(matches!(
             room_commander.start_game().await,
-            Err(GameError::CannotStartTheGameFromCurrentState)
+            Err(GameError::OperationNotAllowedAtCurrentState)
         ));
     }
 
@@ -348,7 +354,7 @@ mod tests {
 
         assert!(matches!(
             room_commander.new_player("test".into()).await,
-            Err(GameError::CannotAddNewPlayers)
+            Err(GameError::OperationNotAllowedAtCurrentState)
         ));
     }
 
@@ -361,7 +367,7 @@ mod tests {
         clean_events(&mut players).await;
 
         for (player_id, _) in players.iter() {
-            room_commander.set_player_ready(*player_id).await;
+            let _ = room_commander.set_player_ready(*player_id).await;
         }
 
         for (_, player_rx) in players.iter_mut() {
@@ -370,6 +376,24 @@ mod tests {
             let received_event = get_nth_event(player_rx, 1).await;
             assert!(matches!(received_event, RoomEvent::PlayerTurn(_)));
         }
+    }
+
+    #[tokio::test]
+    async fn cannot_set_ready_when_stage_is_not_peeking_phase() {
+        pause();
+        let mut room_commander = RoomServer::new();
+        let mut players = create_n_players(&mut room_commander, 6, true).await;
+        room_commander.start_game().await.unwrap();
+
+        clean_events(&mut players).await;
+        sleep(PEEKING_PHASE_COUNTDOWN).await;
+        sleep(Duration::from_secs(1)).await; //give breathing room
+        clean_events(&mut players).await;
+
+        assert!(matches!(
+            room_commander.set_player_ready(players[0].0).await,
+            Err(GameError::OperationNotAllowedAtCurrentState)
+        ));
     }
 
     #[tokio::test]

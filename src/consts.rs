@@ -5,8 +5,7 @@ pub enum GameError {
     NameAlreadyExists,
     NotEnoughPlayers,
     TooManyPlayers,
-    CannotAddNewPlayers,
-    CannotStartTheGameFromCurrentState,
+    OperationNotAllowedAtCurrentState,
 }
 
 pub const MIN_PLAYERS: usize = 2;
