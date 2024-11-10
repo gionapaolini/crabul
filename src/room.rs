@@ -7,61 +7,75 @@ use tokio::{
         mpsc::{self, UnboundedReceiver, UnboundedSender},
         oneshot,
     },
+    time::sleep,
 };
 
-pub const MIN_PLAYERS: usize = 2;
-pub const MAX_PLAYERS: usize = 6;
+use crate::{
+    consts::{
+        GameError, PlayerId, PlayerName, RoomId, MAX_PLAYERS, MIN_PLAYERS, PEEKING_PHASE_COUNTDOWN,
+    },
+    deck::{Card, Deck},
+    room_commander::RoomCommander,
+};
 
-#[derive(Debug)]
-pub enum GameError {
-    NameAlreadyExists,
-    NotEnoughPlayers,
-    TooManyPlayers,
+pub enum RoomCommand {
+    AddPlayer {
+        name: PlayerName,
+        cmd_tx: oneshot::Sender<Result<(PlayerId, UnboundedReceiver<RoomEvent>), GameError>>,
+    },
+    RemovePlayer {
+        id: PlayerId,
+        cmd_tx: oneshot::Sender<()>,
+    },
+    StartGame {
+        cmd_tx: oneshot::Sender<Result<(), GameError>>,
+    },
+    SetPlayerReady {
+        id: PlayerId,
+        cmd_tx: oneshot::Sender<()>,
+    },
+    NextTurn,
 }
 
-pub struct RoomCommander {
-    tx_channel: UnboundedSender<RoomCommand>,
-}
-
-impl RoomCommander {
-    pub async fn new_player(
-        &self,
-        name: String,
-    ) -> Result<(PlayerId, UnboundedReceiver<RoomEvent>), GameError> {
-        let (cmd_tx, cmd_rx) = oneshot::channel();
-        self.tx_channel
-            .send(RoomCommand::AddPlayer { name, cmd_tx })
-            .unwrap();
-        cmd_rx.await.unwrap()
-    }
-    pub async fn remove_player(&self, id: PlayerId) {
-        let (cmd_tx, cmd_rx) = oneshot::channel();
-        self.tx_channel
-            .send(RoomCommand::RemovePlayer { id, cmd_tx })
-            .unwrap();
-        cmd_rx.await.unwrap();
-    }
-    pub async fn start_game(&self) -> Result<(), GameError> {
-        let (cmd_tx, cmd_rx) = oneshot::channel();
-        self.tx_channel
-            .send(RoomCommand::StartGame { cmd_tx })
-            .unwrap();
-        cmd_rx.await.unwrap()
-    }
+#[derive(Clone)]
+pub enum RoomEvent {
+    PlayerJoined {
+        room_id: RoomId,
+        player_id: PlayerId,
+        player_name: PlayerName,
+    },
+    PlayerLeft(PlayerId),
+    GameStarted,
+    PlayerTurn(PlayerId),
+    PeekingPhaseStarted((Card, Card)),
+    PlayerIsReady(PlayerId),
 }
 
 pub struct Player {
     id: PlayerId,
     name: PlayerName,
     tx: UnboundedSender<RoomEvent>,
+    cards: Vec<Card>,
+    ready: bool,
 }
 
+#[derive(PartialEq)]
+pub enum State {
+    NotStarted,
+    PeekingPhase,
+    StartTurn(PlayerId),
+}
 pub struct RoomServer {
     id: RoomId,
     tx_channel: UnboundedSender<RoomCommand>,
     rx_channel: UnboundedReceiver<RoomCommand>,
     players: HashMap<PlayerId, Player>,
+    deck: Deck,
+    state: State,
+    current_player_idx: usize,
+    turn_order: HashMap<usize, PlayerId>,
 }
+
 impl RoomServer {
     pub fn new() -> RoomCommander {
         let (tx_channel, rx_channel) = mpsc::unbounded_channel();
@@ -71,11 +85,15 @@ impl RoomServer {
             tx_channel: tx_channel.clone(),
             rx_channel,
             players: HashMap::with_capacity(6),
+            deck: Deck::new(),
+            state: State::NotStarted,
+            current_player_idx: 0,
+            turn_order: HashMap::with_capacity(6),
         };
 
         spawn(room_server.run());
 
-        RoomCommander { tx_channel }
+        RoomCommander::new(tx_channel)
     }
     pub async fn run(mut self) {
         while let Some(cmd) = self.rx_channel.recv().await {
@@ -92,26 +110,56 @@ impl RoomServer {
                     let res = self.start_game();
                     let _ = cmd_tx.send(res);
                 }
+                RoomCommand::SetPlayerReady { id, cmd_tx } => {
+                    self.set_player_ready(id);
+                    let _ = cmd_tx.send(());
+                }
+                RoomCommand::NextTurn => self.next_turn(),
             }
         }
     }
 
     fn start_game(&mut self) -> Result<(), GameError> {
+        if self.state != State::NotStarted {
+            return Err(GameError::CannotStartTheGameFromCurrentState);
+        }
+
         if self.players.len() < MIN_PLAYERS {
             return Err(GameError::NotEnoughPlayers);
         }
-        let event = RoomEvent::GameStarted;
-        self.send_all_players(event);
 
-        let event = RoomEvent::PlayerTurn(*self.players.keys().last().unwrap());
-        self.send_all_players(event);
+        for (i, (&player_id, _)) in self.players.iter().enumerate() {
+            self.turn_order.insert(i, player_id);
+        }
+
+        self.state = State::PeekingPhase;
+
+        self.deal_cards_and_peek();
+
         Ok(())
+    }
+
+    fn deal_cards_and_peek(&mut self) {
+        self.players.iter_mut().for_each(|(_, player)| {
+            for _ in 0..4 {
+                player.cards.push(self.deck.draw());
+            }
+            let _ = player.tx.send(RoomEvent::PeekingPhaseStarted((
+                player.cards[0],
+                player.cards[1],
+            )));
+        });
+        spawn(Self::peeking_phase_countdown(self.tx_channel.clone()));
     }
 
     fn new_player(
         &mut self,
         name: PlayerName,
     ) -> Result<(PlayerId, UnboundedReceiver<RoomEvent>), GameError> {
+        if self.state != State::NotStarted {
+            return Err(GameError::CannotAddNewPlayers);
+        }
+
         if self.players.len() >= MAX_PLAYERS {
             return Err(GameError::TooManyPlayers);
         }
@@ -129,6 +177,8 @@ impl RoomServer {
                 id: player_id,
                 name: name.clone(),
                 tx: tx_channel,
+                cards: vec![],
+                ready: false,
             },
         );
 
@@ -151,45 +201,46 @@ impl RoomServer {
         self.send_all_players(event);
     }
 
+    fn set_player_ready(&mut self, id: PlayerId) {
+        let player = self.players.get_mut(&id).unwrap();
+        player.ready = true;
+        let event = RoomEvent::PlayerIsReady(id);
+        self.send_all_players(event);
+        if self.players.iter().all(|(_, player)| player.ready) {
+            let _ = self.tx_channel.send(RoomCommand::NextTurn);
+        }
+    }
+
+    fn next_turn(&mut self) {
+        self.current_player_idx += 1;
+        let idx = self.current_player_idx % self.players.len();
+        let current_player_id = self.turn_order[&idx];
+        self.state = State::StartTurn(current_player_id);
+
+        let event = RoomEvent::PlayerTurn(current_player_id);
+        self.send_all_players(event);
+    }
+
     fn send_all_players(&self, event: RoomEvent) {
         self.players.iter().for_each(|(_, player)| {
             let _ = player.tx.send(event.clone());
         });
     }
-}
 
-pub type RoomId = u16;
-pub type PlayerId = u16;
-pub type PlayerName = String;
-
-#[derive(Clone)]
-pub enum RoomEvent {
-    PlayerJoined {
-        room_id: RoomId,
-        player_id: PlayerId,
-        player_name: PlayerName,
-    },
-    PlayerLeft(PlayerId),
-    GameStarted,
-    PlayerTurn(PlayerId),
-}
-
-pub enum RoomCommand {
-    AddPlayer {
-        name: PlayerName,
-        cmd_tx: oneshot::Sender<Result<(PlayerId, UnboundedReceiver<RoomEvent>), GameError>>,
-    },
-    RemovePlayer {
-        id: PlayerId,
-        cmd_tx: oneshot::Sender<()>,
-    },
-    StartGame {
-        cmd_tx: oneshot::Sender<Result<(), GameError>>,
-    },
+    async fn peeking_phase_countdown(tx_channel: UnboundedSender<RoomCommand>) {
+        sleep(PEEKING_PHASE_COUNTDOWN).await;
+        let _ = tx_channel.send(RoomCommand::NextTurn);
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use tokio::time::pause;
+
+    use crate::room_commander::RoomCommander;
+
     use super::*;
 
     #[tokio::test]
@@ -269,14 +320,72 @@ mod tests {
         let mut players = create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
 
-        let players_ids: Vec<PlayerId> = players.iter().map(|(id, _)| *id).collect();
         for (_, player_rx) in players.iter_mut() {
             let received_event = get_nth_event(player_rx, 1).await;
-            assert!(matches!(received_event, RoomEvent::GameStarted));
+            assert!(matches!(
+                received_event,
+                RoomEvent::PeekingPhaseStarted((_, _))
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn cannot_start_game_if_state_different_from_not_started() {
+        let mut room_commander = RoomServer::new();
+        create_n_players(&mut room_commander, 6, true).await;
+        room_commander.start_game().await.unwrap();
+        assert!(matches!(
+            room_commander.start_game().await,
+            Err(GameError::CannotStartTheGameFromCurrentState)
+        ));
+    }
+
+    #[tokio::test]
+    async fn new_player_should_fail_when_game_started() {
+        let mut room_commander = RoomServer::new();
+        create_n_players(&mut room_commander, 6, true).await;
+        room_commander.start_game().await.unwrap();
+
+        assert!(matches!(
+            room_commander.new_player("test".into()).await,
+            Err(GameError::CannotAddNewPlayers)
+        ));
+    }
+
+    #[tokio::test]
+    async fn start_turn_when_everyone_is_ready() {
+        let mut room_commander = RoomServer::new();
+        let mut players = create_n_players(&mut room_commander, 6, true).await;
+        room_commander.start_game().await.unwrap();
+
+        clean_events(&mut players).await;
+
+        for (player_id, _) in players.iter() {
+            room_commander.set_player_ready(*player_id).await;
+        }
+
+        for (_, player_rx) in players.iter_mut() {
+            let received_event = get_nth_event(player_rx, 6).await;
+            assert!(matches!(received_event, RoomEvent::PlayerIsReady(_)));
             let received_event = get_nth_event(player_rx, 1).await;
-            assert!(
-                matches!(received_event, RoomEvent::PlayerTurn(id) if players_ids.contains(&id))
-            );
+            assert!(matches!(received_event, RoomEvent::PlayerTurn(_)));
+        }
+    }
+
+    #[tokio::test]
+    async fn automatic_start_turn_after_timeout() {
+        pause();
+        let mut room_commander = RoomServer::new();
+        let mut players = create_n_players(&mut room_commander, 6, true).await;
+        room_commander.start_game().await.unwrap();
+
+        clean_events(&mut players).await;
+        sleep(PEEKING_PHASE_COUNTDOWN).await;
+        sleep(Duration::from_secs(1)).await; //give breathing room
+
+        for (_, player_rx) in players.iter_mut() {
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::PlayerTurn(_)));
         }
     }
 
@@ -302,10 +411,13 @@ mod tests {
             );
         }
         if consume_events {
-            players
-                .iter_mut()
-                .for_each(|(_, rx)| while rx.try_recv().is_ok() {});
+            clean_events(&mut players).await;
         }
         players
+    }
+    async fn clean_events(players: &mut Vec<(PlayerId, UnboundedReceiver<RoomEvent>)>) {
+        players
+            .iter_mut()
+            .for_each(|(_, rx)| while rx.try_recv().is_ok() {});
     }
 }
