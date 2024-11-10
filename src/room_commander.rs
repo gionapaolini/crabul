@@ -14,7 +14,7 @@ pub struct RoomCommander {
 
 impl RoomCommander {
     pub fn new(tx_channel: UnboundedSender<RoomCommand>) -> Self {
-        RoomCommander { tx_channel }
+        Self { tx_channel }
     }
     pub async fn new_player(
         &self,

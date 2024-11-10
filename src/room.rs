@@ -77,10 +77,10 @@ pub struct RoomServer {
 }
 
 impl RoomServer {
-    pub fn new() -> RoomCommander {
+    pub fn start() -> RoomCommander {
         let (tx_channel, rx_channel) = mpsc::unbounded_channel();
 
-        let room_server = RoomServer {
+        let room_server = Self {
             id: thread_rng().gen::<RoomId>(),
             tx_channel: tx_channel.clone(),
             rx_channel,
@@ -95,7 +95,7 @@ impl RoomServer {
 
         RoomCommander::new(tx_channel)
     }
-    pub async fn run(mut self) {
+    async fn run(mut self) {
         while let Some(cmd) = self.rx_channel.recv().await {
             match cmd {
                 RoomCommand::AddPlayer { name, cmd_tx } => {
@@ -201,8 +201,7 @@ impl RoomServer {
         self.send_all_players(event);
     }
 
-    fn set_player_ready(&mut self, id: PlayerId) -> Result<(), GameError>  {
-
+    fn set_player_ready(&mut self, id: PlayerId) -> Result<(), GameError> {
         if self.state != State::PeekingPhase {
             return Err(GameError::OperationNotAllowedAtCurrentState);
         }
@@ -251,7 +250,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_player() {
-        let mut room_commander = RoomServer::new();
+        let mut room_commander = RoomServer::start();
         let mut players = create_n_players(&mut room_commander, 1, false).await;
 
         let received_event = get_nth_event(&mut players[0].1, 1).await;
@@ -262,7 +261,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_player_previous_player_should_receive_the_join_event() {
-        let mut room_commander = RoomServer::new();
+        let mut room_commander = RoomServer::start();
         let mut players = create_n_players(&mut room_commander, 2, false).await;
 
         let received_event = get_nth_event(&mut players[0].1, 2).await;
@@ -273,7 +272,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_player_should_fail_when_name_exists() {
-        let room_commander = RoomServer::new();
+        let room_commander = RoomServer::start();
         let (player_name_1, player_name_2) = ("name1", "name1");
         let _ = room_commander
             .new_player(player_name_1.into())
@@ -286,7 +285,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_player_should_fail_when_there_are_too_many_players() {
-        let mut room_commander = RoomServer::new();
+        let mut room_commander = RoomServer::start();
         create_n_players(&mut room_commander, 6, false).await;
         let res = room_commander.new_player("name_7".into()).await;
 
@@ -295,7 +294,7 @@ mod tests {
 
     #[tokio::test]
     async fn remove_player() {
-        let mut room_commander: RoomCommander = RoomServer::new();
+        let mut room_commander: RoomCommander = RoomServer::start();
         let mut players = create_n_players(&mut room_commander, 3, false).await;
         room_commander.remove_player(players[2].0).await;
 
@@ -312,7 +311,7 @@ mod tests {
 
     #[tokio::test]
     async fn start_game_should_fail_when_not_enough_players() {
-        let mut room_commander = RoomServer::new();
+        let mut room_commander = RoomServer::start();
         create_n_players(&mut room_commander, 1, false).await;
         assert!(matches!(
             room_commander.start_game().await,
@@ -322,7 +321,7 @@ mod tests {
 
     #[tokio::test]
     async fn start_game() {
-        let mut room_commander = RoomServer::new();
+        let mut room_commander = RoomServer::start();
         let mut players = create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
 
@@ -337,7 +336,7 @@ mod tests {
 
     #[tokio::test]
     async fn cannot_start_game_if_state_different_from_not_started() {
-        let mut room_commander = RoomServer::new();
+        let mut room_commander = RoomServer::start();
         create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
         assert!(matches!(
@@ -348,7 +347,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_player_should_fail_when_game_started() {
-        let mut room_commander = RoomServer::new();
+        let mut room_commander = RoomServer::start();
         create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
 
@@ -360,7 +359,7 @@ mod tests {
 
     #[tokio::test]
     async fn start_turn_when_everyone_is_ready() {
-        let mut room_commander = RoomServer::new();
+        let mut room_commander = RoomServer::start();
         let mut players = create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
 
@@ -381,7 +380,7 @@ mod tests {
     #[tokio::test]
     async fn cannot_set_ready_when_stage_is_not_peeking_phase() {
         pause();
-        let mut room_commander = RoomServer::new();
+        let mut room_commander = RoomServer::start();
         let mut players = create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
 
@@ -399,7 +398,7 @@ mod tests {
     #[tokio::test]
     async fn automatic_start_turn_after_timeout() {
         pause();
-        let mut room_commander = RoomServer::new();
+        let mut room_commander = RoomServer::start();
         let mut players = create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
 
@@ -439,7 +438,7 @@ mod tests {
         }
         players
     }
-    async fn clean_events(players: &mut Vec<(PlayerId, UnboundedReceiver<RoomEvent>)>) {
+    async fn clean_events(players: &mut [(PlayerId, UnboundedReceiver<RoomEvent>)]) {
         players
             .iter_mut()
             .for_each(|(_, rx)| while rx.try_recv().is_ok() {});
