@@ -6,6 +6,7 @@ pub enum GameError {
     NotEnoughPlayers,
     TooManyPlayers,
     OperationNotAllowedAtCurrentState,
+    InvalidCardIndex,
 }
 
 pub const MIN_PLAYERS: usize = 2;

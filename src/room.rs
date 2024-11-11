@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, mem};
 
 use rand::{thread_rng, Rng};
 use tokio::{
@@ -24,17 +24,38 @@ pub enum RoomCommand {
         cmd_tx: oneshot::Sender<Result<(PlayerId, UnboundedReceiver<RoomEvent>), GameError>>,
     },
     RemovePlayer {
-        id: PlayerId,
+        player_id: PlayerId,
         cmd_tx: oneshot::Sender<()>,
     },
     StartGame {
         cmd_tx: oneshot::Sender<Result<(), GameError>>,
     },
     SetPlayerReady {
-        id: PlayerId,
+        player_id: PlayerId,
         cmd_tx: oneshot::Sender<Result<(), GameError>>,
     },
     NextTurn,
+    DrawCard {
+        player_id: PlayerId,
+        cmd_tx: oneshot::Sender<Result<Card, GameError>>,
+    },
+    SwapCard {
+        player_id: PlayerId,
+        card_idx: usize,
+        cmd_tx: oneshot::Sender<Result<(), GameError>>,
+    },
+    DiscardCard {
+        player_id: PlayerId,
+        cmd_tx: oneshot::Sender<Result<(), GameError>>,
+    },
+}
+
+#[derive(Copy, Clone, PartialEq)]
+pub enum Power {
+    LookOwnCard,
+    LookOtherCard,
+    BlindSwap,
+    CheckAndSwap,
 }
 
 #[derive(Clone)]
@@ -49,10 +70,14 @@ pub enum RoomEvent {
     PlayerTurn(PlayerId),
     PeekingPhaseStarted((Card, Card)),
     PlayerIsReady(PlayerId),
+    CardWasDrawn(PlayerId),
+    DrawnCard(Card),
+    CardSwapped(PlayerId, usize),
+    CardDiscarded(PlayerId, Card),
+    PowerActivated(PlayerId, Power),
 }
 
 pub struct Player {
-    id: PlayerId,
     name: PlayerName,
     tx: UnboundedSender<RoomEvent>,
     cards: Vec<Card>,
@@ -64,6 +89,8 @@ pub enum State {
     NotStarted,
     PeekingPhase,
     StartTurn(PlayerId),
+    MiddleTurn(PlayerId, Card),
+    PowerStage(PlayerId, Power),
 }
 pub struct RoomServer {
     id: RoomId,
@@ -95,6 +122,7 @@ impl RoomServer {
 
         RoomCommander::new(tx_channel)
     }
+
     async fn run(mut self) {
         while let Some(cmd) = self.rx_channel.recv().await {
             match cmd {
@@ -102,7 +130,10 @@ impl RoomServer {
                     let res = self.new_player(name);
                     let _ = cmd_tx.send(res);
                 }
-                RoomCommand::RemovePlayer { id, cmd_tx } => {
+                RoomCommand::RemovePlayer {
+                    player_id: id,
+                    cmd_tx,
+                } => {
                     self.remove_player(id);
                     let _ = cmd_tx.send(());
                 }
@@ -110,11 +141,33 @@ impl RoomServer {
                     let res = self.start_game();
                     let _ = cmd_tx.send(res);
                 }
-                RoomCommand::SetPlayerReady { id, cmd_tx } => {
+                RoomCommand::SetPlayerReady {
+                    player_id: id,
+                    cmd_tx,
+                } => {
                     let res = self.set_player_ready(id);
                     let _ = cmd_tx.send(res);
                 }
                 RoomCommand::NextTurn => self.next_turn(),
+                RoomCommand::DrawCard {
+                    player_id: id,
+                    cmd_tx,
+                } => {
+                    let res = self.draw_card(id);
+                    let _ = cmd_tx.send(res);
+                }
+                RoomCommand::SwapCard {
+                    player_id,
+                    card_idx,
+                    cmd_tx,
+                } => {
+                    let res = self.swap_card(player_id, card_idx);
+                    let _ = cmd_tx.send(res);
+                }
+                RoomCommand::DiscardCard { player_id, cmd_tx } => {
+                    let res = self.discard_card(player_id);
+                    let _ = cmd_tx.send(res);
+                }
             }
         }
     }
@@ -174,7 +227,6 @@ impl RoomServer {
         self.players.insert(
             player_id,
             Player {
-                id: player_id,
                 name: name.clone(),
                 tx: tx_channel,
                 cards: vec![],
@@ -224,6 +276,84 @@ impl RoomServer {
 
         let event = RoomEvent::PlayerTurn(current_player_id);
         self.send_all_players(event);
+    }
+
+    fn draw_card(&mut self, player_id: PlayerId) -> Result<Card, GameError> {
+        if self.state != State::StartTurn(player_id) {
+            return Err(GameError::OperationNotAllowedAtCurrentState);
+        }
+        let card = self.deck.draw();
+        self.state = State::MiddleTurn(player_id, card);
+
+        let event = RoomEvent::CardWasDrawn(player_id);
+        self.send_all_players(event);
+
+        let event = RoomEvent::DrawnCard(card);
+        self.send_to_player(player_id, event);
+
+        Ok(card)
+    }
+
+    fn swap_card(&mut self, player_id: PlayerId, card_idx: usize) -> Result<(), GameError> {
+        if let State::MiddleTurn(stored_player_id, mut card) = self.state {
+            if player_id != stored_player_id {
+                return Err(GameError::OperationNotAllowedAtCurrentState);
+            }
+            let player = self.players.get_mut(&player_id).unwrap();
+            if card_idx >= player.cards.len() {
+                return Err(GameError::InvalidCardIndex);
+            }
+            mem::swap(&mut card, &mut player.cards[card_idx]);
+            self.deck.discard(card);
+            let event = RoomEvent::CardSwapped(player_id, card_idx);
+            self.send_all_players(event);
+            let event = RoomEvent::CardDiscarded(player_id, card);
+            self.send_all_players(event);
+            self.next_turn();
+            return Ok(());
+        }
+        Err(GameError::OperationNotAllowedAtCurrentState)
+    }
+
+    fn discard_card(&mut self, player_id: PlayerId) -> Result<(), GameError> {
+        if let State::MiddleTurn(stored_player_id, card) = self.state {
+            if player_id != stored_player_id {
+                return Err(GameError::OperationNotAllowedAtCurrentState);
+            }
+
+            self.deck.discard(card);
+            let event = RoomEvent::CardDiscarded(player_id, card);
+            self.send_all_players(event);
+
+            if let Some(power) = self.match_power(card) {
+                let event = RoomEvent::PowerActivated(player_id, power);
+                self.send_all_players(event);
+                self.state = State::PowerStage(player_id, power);
+            }
+
+            self.next_turn();
+            return Ok(());
+        }
+        Err(GameError::OperationNotAllowedAtCurrentState)
+    }
+
+    fn match_power(&self, card: Card) -> Option<Power> {
+        match card {
+            Card::Clubs(n) | Card::Diamonds(n) | Card::Hearts(n) | Card::Spade(n) => match n {
+                n if n < 7 => None,
+                7 | 8 => Some(Power::LookOwnCard),
+                9 | 10 => Some(Power::LookOtherCard),
+                11 | 12 => Some(Power::BlindSwap),
+                13 => Some(Power::CheckAndSwap),
+                _ => unreachable!(),
+            },
+            Card::Joker => None,
+        }
+    }
+
+    fn send_to_player(&self, player_id: PlayerId, event: RoomEvent) {
+        let player = self.players.get(&player_id).unwrap();
+        let _ = player.tx.send(event);
     }
 
     fn send_all_players(&self, event: RoomEvent) {
@@ -412,6 +542,144 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn draw_card() {
+        pause();
+        let mut room_commander = RoomServer::start();
+        let mut players = create_n_players(&mut room_commander, 6, true).await;
+        room_commander.start_game().await.unwrap();
+
+        clean_events(&mut players).await;
+        sleep(PEEKING_PHASE_COUNTDOWN).await;
+        sleep(Duration::from_secs(1)).await; //give breathing room
+
+        if let RoomEvent::PlayerTurn(player_id) = players[0].1.recv().await.unwrap() {
+            clean_events(&mut players).await;
+            room_commander.draw_card(player_id).await.unwrap();
+            for (_, player_rx) in players.iter_mut() {
+                let received_event = get_nth_event(player_rx, 1).await;
+                assert!(matches!(received_event, RoomEvent::CardWasDrawn(id) if player_id==id));
+            }
+            let (_, player_rx) = players.iter_mut().find(|(id, _)| *id == player_id).unwrap();
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::DrawnCard(_)));
+        } else {
+            panic!("Did not return PlayerTurn event")
+        }
+    }
+
+    #[tokio::test]
+    async fn swap_card() {
+        pause();
+        let mut room_commander = RoomServer::start();
+        let mut players = create_n_players(&mut room_commander, 6, true).await;
+        room_commander.start_game().await.unwrap();
+
+        let peeked_cards: Vec<(Card, Card)> = players
+            .iter_mut()
+            .map(|(_, player)| {
+                let peeked = player.try_recv().unwrap();
+                if let RoomEvent::PeekingPhaseStarted((card1, card2)) = peeked {
+                    (card1, card2)
+                } else {
+                    panic!("Did not return peeking phase event")
+                }
+            })
+            .collect();
+
+        clean_events(&mut players).await;
+        sleep(PEEKING_PHASE_COUNTDOWN).await;
+        sleep(Duration::from_secs(1)).await; //give breathing room
+
+        if let RoomEvent::PlayerTurn(player_id) = players[0].1.recv().await.unwrap() {
+            clean_events(&mut players).await;
+            room_commander.draw_card(player_id).await.unwrap();
+            for (_, player_rx) in players.iter_mut() {
+                let received_event = get_nth_event(player_rx, 1).await;
+                assert!(matches!(received_event, RoomEvent::CardWasDrawn(id) if player_id==id));
+            }
+            clean_events(&mut players).await;
+
+            let (card1, _) = peeked_cards
+                .get(players.iter().position(|(id, _)| *id == player_id).unwrap())
+                .unwrap();
+            let idx_card_to_swap = 0;
+            room_commander
+                .swap_card(player_id, idx_card_to_swap)
+                .await
+                .unwrap();
+            for (_, player_rx) in players.iter_mut() {
+                let received_event = get_nth_event(player_rx, 1).await;
+                assert!(
+                    matches!(received_event, RoomEvent::CardSwapped(id, idx_card) if player_id==id  && idx_card_to_swap == idx_card)
+                );
+                let received_event = get_nth_event(player_rx, 1).await;
+                assert!(
+                    matches!(received_event, RoomEvent::CardDiscarded(id, card) if player_id == id && card == *card1)
+                );
+                let received_event = get_nth_event(player_rx, 1).await;
+                assert!(matches!(received_event, RoomEvent::PlayerTurn(_)));
+            }
+        } else {
+            panic!("Did not return PlayerTurn event")
+        }
+    }
+
+    #[tokio::test]
+    async fn discard_card_normal_card() {
+        let drawn_card = Card::Diamonds(1);
+        let state = State::MiddleTurn(0, drawn_card);
+        let deck = Deck::new();
+        let cards = vec![
+            Card::Clubs(1),
+            Card::Clubs(2),
+            Card::Clubs(3),
+            Card::Clubs(4),
+        ];
+
+        let (room_commander, mut players_rxs) = init_specific_game_room(state, deck, cards, None);
+
+        let _ = room_commander.discard_card(0).await;
+
+        for player_rx in players_rxs.iter_mut() {
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(
+                received_event,
+                RoomEvent::CardDiscarded(id, card) if id==0 && card == drawn_card
+            ));
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::PlayerTurn(1)));
+        }
+    }
+
+    #[tokio::test]
+    async fn discard_power() {
+        let drawn_card = Card::Diamonds(7);
+        let state = State::MiddleTurn(0, drawn_card);
+        let deck = Deck::new();
+        let cards = vec![
+            Card::Clubs(1),
+            Card::Clubs(2),
+            Card::Clubs(3),
+            Card::Clubs(4),
+        ];
+
+        let (room_commander, mut players_rxs) = init_specific_game_room(state, deck, cards, None);
+
+        let _ = room_commander.discard_card(0).await;
+
+        for player_rx in players_rxs.iter_mut() {
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(
+                received_event,
+                RoomEvent::CardDiscarded(id, card) if id==0 && card == drawn_card
+            ));
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::PowerActivated(id, _) if id==0));
+        }
+    }
+
+    // UTILS
     async fn get_nth_event(rcv: &mut UnboundedReceiver<RoomEvent>, nth: u8) -> RoomEvent {
         for _ in 1..nth {
             rcv.try_recv().unwrap();
@@ -442,5 +710,65 @@ mod tests {
         players
             .iter_mut()
             .for_each(|(_, rx)| while rx.try_recv().is_ok() {});
+    }
+
+    fn init_specific_game_room(
+        state: State,
+        deck: Deck,
+        current_player_cards: Vec<Card>,
+        other_player_cards: Option<Vec<Card>>,
+    ) -> (RoomCommander, Vec<UnboundedReceiver<RoomEvent>>) {
+        let (tx_channel, rx_channel) = mpsc::unbounded_channel();
+
+        let mut players = HashMap::new();
+
+        let mut players_rxs = vec![];
+
+        let (player, player_rx) = init_specific_player(0, current_player_cards);
+        players.insert(0, player);
+        players_rxs.push(player_rx);
+
+        if let Some(cards) = other_player_cards {
+            let (player, player_rx) = init_specific_player(1, cards);
+            players.insert(1, player);
+            players_rxs.push(player_rx);
+        }
+
+        for i in players.len() as PlayerId..6 {
+            let (player, player_rx) = init_specific_player(i, vec![]);
+            players.insert(i, player);
+            players_rxs.push(player_rx);
+        }
+
+        let room_server = RoomServer {
+            id: thread_rng().gen::<RoomId>(),
+            tx_channel: tx_channel.clone(),
+            rx_channel,
+            players,
+            deck,
+            state,
+            current_player_idx: 0,
+            turn_order: HashMap::from([(0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5)]),
+        };
+
+        spawn(room_server.run());
+
+        (RoomCommander::new(tx_channel), players_rxs)
+    }
+
+    fn init_specific_player(
+        id: PlayerId,
+        cards: Vec<Card>,
+    ) -> (Player, UnboundedReceiver<RoomEvent>) {
+        let (tx_channel, rx_channel) = mpsc::unbounded_channel();
+        (
+            Player {
+                name: format!("Player_{id}"),
+                tx: tx_channel,
+                cards,
+                ready: true,
+            },
+            rx_channel,
+        )
     }
 }

@@ -5,6 +5,7 @@ use tokio::sync::{
 
 use crate::{
     consts::{GameError, PlayerId},
+    deck::Card,
     room::{RoomCommand, RoomEvent},
 };
 
@@ -29,7 +30,10 @@ impl RoomCommander {
     pub async fn remove_player(&self, id: PlayerId) {
         let (cmd_tx, cmd_rx) = oneshot::channel();
         self.tx_channel
-            .send(RoomCommand::RemovePlayer { id, cmd_tx })
+            .send(RoomCommand::RemovePlayer {
+                player_id: id,
+                cmd_tx,
+            })
             .unwrap();
         cmd_rx.await.unwrap();
     }
@@ -43,7 +47,41 @@ impl RoomCommander {
     pub async fn set_player_ready(&self, id: PlayerId) -> Result<(), GameError> {
         let (cmd_tx, cmd_rx) = oneshot::channel();
         self.tx_channel
-            .send(RoomCommand::SetPlayerReady { id, cmd_tx })
+            .send(RoomCommand::SetPlayerReady {
+                player_id: id,
+                cmd_tx,
+            })
+            .unwrap();
+        cmd_rx.await.unwrap()
+    }
+    pub async fn draw_card(&self, id: PlayerId) -> Result<Card, GameError> {
+        let (cmd_tx, cmd_rx) = oneshot::channel();
+        self.tx_channel
+            .send(RoomCommand::DrawCard {
+                player_id: id,
+                cmd_tx,
+            })
+            .unwrap();
+        cmd_rx.await.unwrap()
+    }
+    pub async fn swap_card(&self, id: PlayerId, card_idx: usize) -> Result<(), GameError> {
+        let (cmd_tx, cmd_rx) = oneshot::channel();
+        self.tx_channel
+            .send(RoomCommand::SwapCard {
+                player_id: id,
+                card_idx,
+                cmd_tx,
+            })
+            .unwrap();
+        cmd_rx.await.unwrap()
+    }
+    pub async fn discard_card(&self, id: PlayerId) -> Result<(), GameError> {
+        let (cmd_tx, cmd_rx) = oneshot::channel();
+        self.tx_channel
+            .send(RoomCommand::DiscardCard {
+                player_id: id,
+                cmd_tx,
+            })
             .unwrap();
         cmd_rx.await.unwrap()
     }
