@@ -11,6 +11,15 @@ pub enum Card {
     Joker,
 }
 
+impl Card {
+    pub fn get_value(&self) -> Option<u8> {
+        match self {
+            Card::Clubs(n) | Card::Diamonds(n) | Card::Hearts(n) | Card::Spade(n) => Some(*n),
+            Card::Joker => None,
+        }
+    }
+}
+
 pub struct Deck {
     cards: Vec<Card>,
     discard_pile: Vec<Card>,
@@ -51,5 +60,9 @@ impl Deck {
 
     pub fn discard(&mut self, card: Card) {
         self.discard_pile.push(card);
+    }
+
+    pub fn get_last_discarded(&self) -> Option<&Card> {
+        self.discard_pile.last()
     }
 }

@@ -167,4 +167,22 @@ impl RoomCommander {
             .unwrap();
         cmd_rx.await.unwrap()
     }
+
+    pub async fn throw_same_card(
+        &self,
+        player_id: PlayerId,
+        picked_player_id: PlayerId,
+        picked_card_idx: usize,
+    ) -> Result<(), GameError> {
+        let (cmd_tx, cmd_rx) = oneshot::channel();
+        self.tx_channel
+            .send(RoomCommand::ThrowSameCard {
+                player_id,
+                picked_player_id,
+                picked_card_idx,
+                cmd_tx,
+            })
+            .unwrap();
+        cmd_rx.await.unwrap()
+    }
 }
