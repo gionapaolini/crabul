@@ -85,12 +85,50 @@ impl RoomCommander {
             .unwrap();
         cmd_rx.await.unwrap()
     }
-    pub async fn look_own_card(&self, id: PlayerId, card_idx: usize) -> Result<(), GameError> {
+    pub async fn peek_own_card(&self, id: PlayerId, card_idx: usize) -> Result<(), GameError> {
         let (cmd_tx, cmd_rx) = oneshot::channel();
         self.tx_channel
             .send(RoomCommand::PeekOwnCard {
                 player_id: id,
                 card_idx,
+                cmd_tx,
+            })
+            .unwrap();
+        cmd_rx.await.unwrap()
+    }
+
+    pub async fn peek_other_card(
+        &self,
+        player_id: PlayerId,
+        other_player_id: PlayerId,
+        other_card_idx: usize,
+    ) -> Result<(), GameError> {
+        let (cmd_tx, cmd_rx) = oneshot::channel();
+        self.tx_channel
+            .send(RoomCommand::PeekOtherCard {
+                player_id,
+                other_player_id,
+                other_card_idx,
+                cmd_tx,
+            })
+            .unwrap();
+        cmd_rx.await.unwrap()
+    }
+
+    pub async fn blind_swap(
+        &self,
+        player_id: PlayerId,
+        card_idx: usize,
+        other_player_id: PlayerId,
+        other_card_idx: usize,
+    ) -> Result<(), GameError> {
+        let (cmd_tx, cmd_rx) = oneshot::channel();
+        self.tx_channel
+            .send(RoomCommand::BlindSwap {
+                player_id,
+                card_idx,
+                other_player_id,
+                other_card_idx,
                 cmd_tx,
             })
             .unwrap();
