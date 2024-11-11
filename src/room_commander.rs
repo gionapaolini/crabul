@@ -85,4 +85,15 @@ impl RoomCommander {
             .unwrap();
         cmd_rx.await.unwrap()
     }
+    pub async fn look_own_card(&self, id: PlayerId, card_idx: usize) -> Result<(), GameError> {
+        let (cmd_tx, cmd_rx) = oneshot::channel();
+        self.tx_channel
+            .send(RoomCommand::PeekOwnCard {
+                player_id: id,
+                card_idx,
+                cmd_tx,
+            })
+            .unwrap();
+        cmd_rx.await.unwrap()
+    }
 }

@@ -48,12 +48,17 @@ pub enum RoomCommand {
         player_id: PlayerId,
         cmd_tx: oneshot::Sender<Result<(), GameError>>,
     },
+    PeekOwnCard {
+        player_id: PlayerId,
+        card_idx: usize,
+        cmd_tx: oneshot::Sender<Result<(), GameError>>,
+    },
 }
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum Power {
-    LookOwnCard,
-    LookOtherCard,
+    PeekOwnCard,
+    PeekOtherCard,
     BlindSwap,
     CheckAndSwap,
 }
@@ -75,6 +80,14 @@ pub enum RoomEvent {
     CardSwapped(PlayerId, usize),
     CardDiscarded(PlayerId, Card),
     PowerActivated(PlayerId, Power),
+    PeekedCard(Card),
+    PowerUsed(
+        Power,
+        PlayerId,
+        Option<usize>,
+        Option<PlayerId>,
+        Option<usize>,
+    ),
 }
 
 pub struct Player {
@@ -166,6 +179,14 @@ impl RoomServer {
                 }
                 RoomCommand::DiscardCard { player_id, cmd_tx } => {
                     let res = self.discard_card(player_id);
+                    let _ = cmd_tx.send(res);
+                }
+                RoomCommand::PeekOwnCard {
+                    player_id,
+                    card_idx,
+                    cmd_tx,
+                } => {
+                    let res = self.peek_own_card(player_id, card_idx);
                     let _ = cmd_tx.send(res);
                 }
             }
@@ -337,12 +358,35 @@ impl RoomServer {
         Err(GameError::OperationNotAllowedAtCurrentState)
     }
 
+    fn peek_own_card(&mut self, player_id: PlayerId, card_idx: usize) -> Result<(), GameError> {
+        if let State::PowerStage(stored_player_id, Power::PeekOwnCard) = self.state {
+            if player_id != stored_player_id {
+                return Err(GameError::OperationNotAllowedAtCurrentState);
+            }
+
+            let player = self.players.get(&player_id).unwrap();
+            if card_idx >= player.cards.len() {
+                return Err(GameError::InvalidCardIndex);
+            }
+            let card = player.cards[card_idx];
+            let event = RoomEvent::PeekedCard(card);
+            self.send_to_player(player_id, event);
+
+            let event =
+                RoomEvent::PowerUsed(Power::PeekOwnCard, player_id, Some(card_idx), None, None);
+            self.send_all_players(event);
+            self.next_turn();
+            return Ok(());
+        }
+        Err(GameError::OperationNotAllowedAtCurrentState)
+    }
+
     fn match_power(&self, card: Card) -> Option<Power> {
         match card {
             Card::Clubs(n) | Card::Diamonds(n) | Card::Hearts(n) | Card::Spade(n) => match n {
                 n if n < 7 => None,
-                7 | 8 => Some(Power::LookOwnCard),
-                9 | 10 => Some(Power::LookOtherCard),
+                7 | 8 => Some(Power::PeekOwnCard),
+                9 | 10 => Some(Power::PeekOtherCard),
                 11 | 12 => Some(Power::BlindSwap),
                 13 => Some(Power::CheckAndSwap),
                 _ => unreachable!(),
@@ -666,7 +710,7 @@ mod tests {
 
         let (room_commander, mut players_rxs) = init_specific_game_room(state, deck, cards, None);
 
-        let _ = room_commander.discard_card(0).await;
+        room_commander.discard_card(0).await.unwrap();
 
         for player_rx in players_rxs.iter_mut() {
             let received_event = get_nth_event(player_rx, 1).await;
@@ -676,6 +720,39 @@ mod tests {
             ));
             let received_event = get_nth_event(player_rx, 1).await;
             assert!(matches!(received_event, RoomEvent::PowerActivated(id, _) if id==0));
+        }
+    }
+
+    #[tokio::test]
+    async fn use_power_look_own_card() {
+        let state = State::PowerStage(0, Power::PeekOwnCard);
+        let deck = Deck::new();
+        let cards = vec![
+            Card::Clubs(1),
+            Card::Clubs(2),
+            Card::Clubs(3),
+            Card::Clubs(4),
+        ];
+
+        let (room_commander, mut players_rxs) =
+            init_specific_game_room(state, deck, cards.clone(), None);
+
+        room_commander.look_own_card(0, 3).await.unwrap();
+
+        let received_event = players_rxs[0].try_recv().unwrap();
+        assert!(matches!(
+            received_event,
+            RoomEvent::PeekedCard(card) if card==cards[3]
+        ));
+
+        for player_rx in players_rxs.iter_mut() {
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(
+                received_event,
+                RoomEvent::PowerUsed(Power::PeekOwnCard, 0, Some(3), None, None)
+            ));
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::PlayerTurn(1)));
         }
     }
 
