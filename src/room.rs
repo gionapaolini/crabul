@@ -35,6 +35,10 @@ pub enum RoomCommand {
         cmd_tx: oneshot::Sender<Result<(), GameError>>,
     },
     NextTurn,
+    GoCrabul {
+        player_id: PlayerId,
+        cmd_tx: oneshot::Sender<Result<(), GameError>>,
+    },
     DrawCard {
         player_id: PlayerId,
         cmd_tx: oneshot::Sender<Result<Card, GameError>>,
@@ -133,6 +137,7 @@ pub enum RoomEvent {
     ),
     SameCardAttempt(PlayerId, PlayerId, usize, Option<Card>, SameCardResult),
     CardReplaced(PlayerId, usize, PlayerId, usize),
+    PlayerWentCrabul(PlayerId),
 }
 
 pub struct Player {
@@ -161,6 +166,7 @@ pub struct RoomServer {
     same_card_thrown: bool,
     current_player_idx: usize,
     turn_order: HashMap<usize, PlayerId>,
+    crabul_player: Option<PlayerId>,
 }
 
 impl RoomServer {
@@ -177,6 +183,7 @@ impl RoomServer {
             same_card_thrown: false,
             current_player_idx: 0,
             turn_order: HashMap::with_capacity(6),
+            crabul_player: None,
         };
 
         (room_server, RoomCommander::new(tx_channel))
@@ -195,6 +202,7 @@ impl RoomServer {
             same_card_thrown: false,
             current_player_idx: 0,
             turn_order: HashMap::with_capacity(6),
+            crabul_player: None,
         };
 
         spawn(room_server.run());
@@ -209,30 +217,25 @@ impl RoomServer {
                     let res = self.new_player(name);
                     let _ = cmd_tx.send(res);
                 }
-                RoomCommand::RemovePlayer {
-                    player_id: id,
-                    cmd_tx,
-                } => {
-                    self.remove_player(id);
+                RoomCommand::RemovePlayer { player_id, cmd_tx } => {
+                    self.remove_player(player_id);
                     let _ = cmd_tx.send(());
                 }
                 RoomCommand::StartGame { cmd_tx } => {
                     let res = self.start_game();
                     let _ = cmd_tx.send(res);
                 }
-                RoomCommand::SetPlayerReady {
-                    player_id: id,
-                    cmd_tx,
-                } => {
-                    let res = self.set_player_ready(id);
+                RoomCommand::SetPlayerReady { player_id, cmd_tx } => {
+                    let res = self.set_player_ready(player_id);
                     let _ = cmd_tx.send(res);
                 }
                 RoomCommand::NextTurn => self.next_turn(),
-                RoomCommand::DrawCard {
-                    player_id: id,
-                    cmd_tx,
-                } => {
-                    let res = self.draw_card(id);
+                RoomCommand::GoCrabul { player_id, cmd_tx } => {
+                    let res = self.go_crabul(player_id);
+                    let _ = cmd_tx.send(res);
+                }
+                RoomCommand::DrawCard { player_id, cmd_tx } => {
+                    let res = self.draw_card(player_id);
                     let _ = cmd_tx.send(res);
                 }
                 RoomCommand::SwapCard {
@@ -409,6 +412,17 @@ impl RoomServer {
         Ok(())
     }
 
+    fn go_crabul(&mut self, player_id: PlayerId) -> Result<(), GameError> {
+        if self.state != State::StartTurn(player_id) || self.crabul_player.is_some() {
+            return Err(GameError::OperationNotAllowedAtCurrentState);
+        }
+        self.crabul_player = Some(player_id);
+        let event = RoomEvent::PlayerWentCrabul(player_id);
+        self.send_all_players(event);
+        self.next_turn();
+        Ok(())
+    }
+
     fn next_turn(&mut self) {
         self.same_card_thrown = false;
         self.current_player_idx += 1;
@@ -438,13 +452,10 @@ impl RoomServer {
 
     fn swap_card(&mut self, player_id: PlayerId, card_idx: usize) -> Result<(), GameError> {
         if let State::MiddleTurn(stored_player_id, mut card) = self.state {
-            if player_id != stored_player_id {
-                return Err(GameError::OperationNotAllowedAtCurrentState);
-            }
+            self.validate_player_turn(player_id, stored_player_id)?;
+            self.validate_idx_card(player_id, card_idx)?;
+
             let player = self.players.get_mut(&player_id).unwrap();
-            if card_idx >= player.cards.len() {
-                return Err(GameError::InvalidCardIndex);
-            }
             mem::swap(&mut card, &mut player.cards[card_idx]);
             self.deck.discard(card);
             let event = RoomEvent::CardSwapped(player_id, card_idx);
@@ -459,9 +470,7 @@ impl RoomServer {
 
     fn discard_card(&mut self, player_id: PlayerId) -> Result<(), GameError> {
         if let State::MiddleTurn(stored_player_id, card) = self.state {
-            if player_id != stored_player_id {
-                return Err(GameError::OperationNotAllowedAtCurrentState);
-            }
+            self.validate_player_turn(player_id, stored_player_id)?;
 
             self.deck.discard(card);
             let event = RoomEvent::CardDiscarded(player_id, card);
@@ -481,9 +490,7 @@ impl RoomServer {
 
     fn peek_own_card(&mut self, player_id: PlayerId, card_idx: usize) -> Result<(), GameError> {
         if let State::PowerStage(stored_player_id, Power::PeekOwnCard) = self.state {
-            if player_id != stored_player_id {
-                return Err(GameError::OperationNotAllowedAtCurrentState);
-            }
+            self.validate_player_turn(player_id, stored_player_id)?;
 
             let player = self.players.get(&player_id).unwrap();
             if card_idx >= player.cards.len() {
@@ -508,9 +515,8 @@ impl RoomServer {
         other_card_idx: usize,
     ) -> Result<(), GameError> {
         if let State::PowerStage(stored_player_id, Power::PeekOtherCard) = self.state {
-            if player_id != stored_player_id {
-                return Err(GameError::OperationNotAllowedAtCurrentState);
-            }
+            self.validate_player_turn(player_id, stored_player_id)?;
+            self.validate_crabul_player(other_player_id)?;
 
             let player = self.players.get(&other_player_id).unwrap();
             if other_card_idx >= player.cards.len() {
@@ -542,9 +548,8 @@ impl RoomServer {
         other_card_idx: usize,
     ) -> Result<(), GameError> {
         if let State::PowerStage(stored_player_id, Power::BlindSwap) = self.state {
-            if player_id != stored_player_id {
-                return Err(GameError::OperationNotAllowedAtCurrentState);
-            }
+            self.validate_player_turn(player_id, stored_player_id)?;
+            self.validate_crabul_player(other_player_id)?;
 
             self.swap_players_card(player_id, card_idx, other_player_id, other_card_idx)?;
 
@@ -569,9 +574,8 @@ impl RoomServer {
         other_card_idx: usize,
     ) -> Result<(), GameError> {
         if let State::PowerStage(stored_player_id, Power::CheckAndSwapStage1) = self.state {
-            if player_id != stored_player_id {
-                return Err(GameError::OperationNotAllowedAtCurrentState);
-            }
+            self.validate_player_turn(player_id, stored_player_id)?;
+            self.validate_crabul_player(other_player_id)?;
 
             let player = self.players.get(&other_player_id).unwrap();
             if other_card_idx >= player.cards.len() {
@@ -608,9 +612,7 @@ impl RoomServer {
             Power::CheckAndSwapStage2(other_player_id, other_card_idx),
         ) = self.state
         {
-            if player_id != stored_player_id {
-                return Err(GameError::OperationNotAllowedAtCurrentState);
-            }
+            self.validate_player_turn(player_id, stored_player_id)?;
 
             if let Some(card_idx) = card_idx {
                 self.swap_players_card(player_id, card_idx, other_player_id, other_card_idx)?;
@@ -789,6 +791,26 @@ impl RoomServer {
         let player = self.players.get(&player_id).unwrap();
         if card_idx >= player.cards.len() {
             return Err(GameError::InvalidCardIndex);
+        }
+        Ok(())
+    }
+
+    fn validate_player_turn(
+        &self,
+        player_id: PlayerId,
+        stored_player_id: PlayerId,
+    ) -> Result<(), GameError> {
+        if player_id != stored_player_id {
+            return Err(GameError::OperationNotAllowedAtCurrentState);
+        }
+        Ok(())
+    }
+
+    fn validate_crabul_player(&self, other_player_id: PlayerId) -> Result<(), GameError> {
+        if let Some(crabul_player) = self.crabul_player {
+            if crabul_player == other_player_id {
+                return Err(GameError::OperationNotAllowedAtCurrentState);
+            }
         }
         Ok(())
     }
@@ -1431,13 +1453,7 @@ mod tests {
             .get_mut(&1)
             .unwrap()
             .cards
-            .push(Card::Hearts(2));
-        server
-            .players
-            .get_mut(&1)
-            .unwrap()
-            .cards
-            .push(Card::Hearts(3));
+            .extend_from_slice(&[Card::Hearts(2), Card::Hearts(3)]);
 
         server.throw_same_card(1, 0, 0).unwrap();
 
@@ -1545,6 +1561,75 @@ mod tests {
         assert!(server.players.get(&1).unwrap().cards.is_empty());
         assert!(server.players.get(&0).unwrap().cards.len() == 1);
     }
+
+    #[tokio::test]
+    async fn go_crabul() {
+        let (mut server, _, mut players_rxs) = get_basic_server();
+        server.state = State::StartTurn(0);
+        server
+            .players
+            .get_mut(&1)
+            .unwrap()
+            .cards
+            .extend_from_slice(&[Card::Hearts(13), Card::Diamonds(1), Card::Joker]);
+
+        server.go_crabul(0).unwrap();
+
+        for player_rx in players_rxs.iter_mut() {
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::PlayerWentCrabul(0)));
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::PlayerTurn(1)));
+        }
+
+        assert!(matches!(server.crabul_player, Some(0)));
+    }
+
+    #[tokio::test]
+    async fn cant_crabul_if_someone_else_already_crabul() {
+        let (mut server, _, mut players_rxs) = get_basic_server();
+        server.state = State::StartTurn(0);
+        server
+            .players
+            .get_mut(&1)
+            .unwrap()
+            .cards
+            .extend_from_slice(&[Card::Hearts(13), Card::Diamonds(1), Card::Joker]);
+
+        server.go_crabul(0).unwrap();
+        players_rxs
+            .iter_mut()
+            .for_each(|rx| while rx.try_recv().is_ok() {});
+        assert!(matches!(
+            server.go_crabul(1),
+            Err(GameError::OperationNotAllowedAtCurrentState)
+        ));
+    }
+
+    #[tokio::test]
+    async fn cant_use_power_on_crabul_player() {
+        let (mut server, _, _) = get_basic_server();
+        server.crabul_player = Some(1);
+
+        server.state = State::PowerStage(0, Power::PeekOtherCard);
+        assert!(matches!(
+            server.peek_other_card(0, 1, 0),
+            Err(GameError::OperationNotAllowedAtCurrentState)
+        ));
+
+        server.state = State::PowerStage(0, Power::BlindSwap);
+        assert!(matches!(
+            server.blind_swap(0, 0, 1, 0),
+            Err(GameError::OperationNotAllowedAtCurrentState)
+        ));
+
+        server.state = State::PowerStage(0, Power::CheckAndSwapStage1);
+        assert!(matches!(
+            server.check_and_swap_stage1(0, 1, 0),
+            Err(GameError::OperationNotAllowedAtCurrentState)
+        ));
+    }
+
     // UTILS
     async fn get_nth_event(rcv: &mut UnboundedReceiver<RoomEvent>, nth: u8) -> RoomEvent {
         for _ in 1..nth {
@@ -1616,6 +1701,7 @@ mod tests {
             state,
             same_card_thrown: false,
             current_player_idx,
+            crabul_player: None,
             turn_order: HashMap::from([(0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5)]),
         };
 

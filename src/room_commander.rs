@@ -54,6 +54,16 @@ impl RoomCommander {
             .unwrap();
         cmd_rx.await.unwrap()
     }
+    pub async fn go_crabul(&self, id: PlayerId) -> Result<(), GameError> {
+        let (cmd_tx, cmd_rx) = oneshot::channel();
+        self.tx_channel
+            .send(RoomCommand::GoCrabul {
+                player_id: id,
+                cmd_tx,
+            })
+            .unwrap();
+        cmd_rx.await.unwrap()
+    }
     pub async fn draw_card(&self, id: PlayerId) -> Result<Card, GameError> {
         let (cmd_tx, cmd_rx) = oneshot::channel();
         self.tx_channel
