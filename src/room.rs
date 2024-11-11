@@ -66,6 +66,17 @@ pub enum RoomCommand {
         other_card_idx: usize,
         cmd_tx: oneshot::Sender<Result<(), GameError>>,
     },
+    CheckAndSwapStage1 {
+        player_id: PlayerId,
+        other_player_id: PlayerId,
+        other_card_idx: usize,
+        cmd_tx: oneshot::Sender<Result<(), GameError>>,
+    },
+    CheckAndSwapStage2 {
+        player_id: PlayerId,
+        card_idx: Option<usize>,
+        cmd_tx: oneshot::Sender<Result<(), GameError>>,
+    },
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -73,7 +84,8 @@ pub enum Power {
     PeekOwnCard,
     PeekOtherCard,
     BlindSwap,
-    CheckAndSwap,
+    CheckAndSwapStage1,
+    CheckAndSwapStage2(PlayerId, usize),
 }
 
 #[derive(Clone)]
@@ -219,6 +231,24 @@ impl RoomServer {
                     cmd_tx,
                 } => {
                     let res = self.blind_swap(player_id, card_idx, other_player_id, other_card_idx);
+                    let _ = cmd_tx.send(res);
+                }
+                RoomCommand::CheckAndSwapStage1 {
+                    player_id,
+                    other_player_id,
+                    other_card_idx,
+                    cmd_tx,
+                } => {
+                    let res =
+                        self.check_and_swap_stage1(player_id, other_player_id, other_card_idx);
+                    let _ = cmd_tx.send(res);
+                }
+                RoomCommand::CheckAndSwapStage2 {
+                    player_id,
+                    card_idx,
+                    cmd_tx,
+                } => {
+                    let res = self.check_and_swap_stage2(player_id, card_idx);
                     let _ = cmd_tx.send(res);
                 }
             }
@@ -457,33 +487,111 @@ impl RoomServer {
                 return Err(GameError::OperationNotAllowedAtCurrentState);
             }
 
-            let player1 = self.players.get(&player_id).unwrap();
-            if card_idx >= player1.cards.len() {
-                return Err(GameError::InvalidCardIndex);
-            }
-
-            let player2 = self.players.get(&other_player_id).unwrap();
-            if other_card_idx >= player2.cards.len() {
-                return Err(GameError::InvalidCardIndex);
-            }
-
-            let mut cards_2 =
-                std::mem::take(&mut self.players.get_mut(&other_player_id).unwrap().cards);
-
-            mem::swap(
-                &mut self.players.get_mut(&player_id).unwrap().cards[card_idx],
-                &mut cards_2[other_card_idx],
-            );
-
-            let _ = mem::replace(
-                &mut self.players.get_mut(&other_player_id).unwrap().cards,
-                cards_2,
-            );
+            self.swap_players_card(player_id, card_idx, other_player_id, other_card_idx)?;
 
             let event = RoomEvent::PowerUsed(
                 Power::BlindSwap,
                 player_id,
                 Some(card_idx),
+                Some(other_player_id),
+                Some(other_card_idx),
+            );
+            self.send_all_players(event);
+            self.next_turn();
+            return Ok(());
+        }
+        Err(GameError::OperationNotAllowedAtCurrentState)
+    }
+
+    fn swap_players_card(
+        &mut self,
+        player_id_1: PlayerId,
+        card_idx_1: usize,
+        player_id_2: PlayerId,
+        card_idx_2: usize,
+    ) -> Result<(), GameError> {
+        let player1 = self.players.get(&player_id_1).unwrap();
+        if card_idx_1 >= player1.cards.len() {
+            return Err(GameError::InvalidCardIndex);
+        }
+
+        let player2 = self.players.get(&player_id_2).unwrap();
+        if card_idx_2 >= player2.cards.len() {
+            return Err(GameError::InvalidCardIndex);
+        }
+
+        let mut cards_2 = std::mem::take(&mut self.players.get_mut(&player_id_2).unwrap().cards);
+
+        mem::swap(
+            &mut self.players.get_mut(&player_id_1).unwrap().cards[card_idx_1],
+            &mut cards_2[card_idx_2],
+        );
+
+        let _ = mem::replace(
+            &mut self.players.get_mut(&player_id_2).unwrap().cards,
+            cards_2,
+        );
+        Ok(())
+    }
+
+    fn check_and_swap_stage1(
+        &mut self,
+        player_id: PlayerId,
+        other_player_id: PlayerId,
+        other_card_idx: usize,
+    ) -> Result<(), GameError> {
+        if let State::PowerStage(stored_player_id, Power::CheckAndSwapStage1) = self.state {
+            if player_id != stored_player_id {
+                return Err(GameError::OperationNotAllowedAtCurrentState);
+            }
+
+            let player = self.players.get(&other_player_id).unwrap();
+            if other_card_idx >= player.cards.len() {
+                return Err(GameError::InvalidCardIndex);
+            }
+            let card = player.cards[other_card_idx];
+            let event = RoomEvent::PeekedCard(card);
+            self.send_to_player(player_id, event);
+
+            let event = RoomEvent::PowerUsed(
+                Power::CheckAndSwapStage1,
+                player_id,
+                None,
+                Some(other_player_id),
+                Some(other_card_idx),
+            );
+            self.send_all_players(event);
+            self.state = State::PowerStage(
+                stored_player_id,
+                Power::CheckAndSwapStage2(other_player_id, other_card_idx),
+            );
+            return Ok(());
+        }
+        Err(GameError::OperationNotAllowedAtCurrentState)
+    }
+
+    fn check_and_swap_stage2(
+        &mut self,
+        player_id: PlayerId,
+        card_idx: Option<usize>,
+    ) -> Result<(), GameError> {
+        if let State::PowerStage(
+            stored_player_id,
+            Power::CheckAndSwapStage2(other_player_id, other_card_idx),
+        ) = self.state
+        {
+            if player_id != stored_player_id {
+                return Err(GameError::OperationNotAllowedAtCurrentState);
+            }
+
+            if let Some(card_idx) = card_idx {
+                self.swap_players_card(player_id, card_idx, other_player_id, other_card_idx)?;
+            }
+
+            let event = RoomEvent::PowerUsed(
+                Power::CheckAndSwapStage2(other_player_id, other_card_idx),
+                player_id,
+                card_idx,
                 Some(other_player_id),
                 Some(other_card_idx),
             );
@@ -501,7 +609,7 @@ impl RoomServer {
                 7 | 8 => Some(Power::PeekOwnCard),
                 9 | 10 => Some(Power::PeekOtherCard),
                 11 | 12 => Some(Power::BlindSwap),
-                13 => Some(Power::CheckAndSwap),
+                13 => Some(Power::CheckAndSwapStage1),
                 _ => unreachable!(),
             },
             Card::Joker => None,
@@ -945,6 +1053,142 @@ mod tests {
             let received_event = get_nth_event(player_rx, 2).await;
             assert!(
                 matches!(received_event, RoomEvent::CardDiscarded(1, card) if card == cards_1[2])
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn use_power_check_and_swap_stage1() {
+        let state = State::PowerStage(0, Power::CheckAndSwapStage1);
+        let deck = Deck::new();
+        let cards_1 = vec![
+            Card::Clubs(1),
+            Card::Clubs(2),
+            Card::Clubs(3),
+            Card::Clubs(4),
+        ];
+        let cards_2 = vec![
+            Card::Diamonds(1),
+            Card::Diamonds(2),
+            Card::Diamonds(3),
+            Card::Diamonds(4),
+        ];
+
+        let (room_commander, mut players_rxs) =
+            init_specific_game_room(0, state, deck, cards_1.clone(), Some(cards_2.clone()));
+
+        room_commander.check_and_swap_stage1(0, 1, 3).await.unwrap();
+
+        let received_event = players_rxs[0].try_recv().unwrap();
+        assert!(matches!(
+            received_event,
+            RoomEvent::PeekedCard(card) if card==cards_2[3]
+        ));
+
+        for player_rx in players_rxs.iter_mut() {
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(
+                received_event,
+                RoomEvent::PowerUsed(Power::CheckAndSwapStage1, 0, None, Some(1), Some(3))
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn use_power_check_and_swap_decide_to_swap() {
+        let state = State::PowerStage(0, Power::CheckAndSwapStage2(1, 3));
+        let deck = Deck::new();
+        let cards_1 = vec![
+            Card::Clubs(1),
+            Card::Clubs(2),
+            Card::Clubs(3),
+            Card::Clubs(4),
+        ];
+        let cards_2 = vec![
+            Card::Diamonds(1),
+            Card::Diamonds(2),
+            Card::Diamonds(3),
+            Card::Diamonds(4),
+        ];
+
+        let (room_commander, mut players_rxs) =
+            init_specific_game_room(0, state, deck, cards_1.clone(), Some(cards_2.clone()));
+
+        room_commander
+            .check_and_swap_stage2(0, Some(2))
+            .await
+            .unwrap();
+
+        for player_rx in players_rxs.iter_mut() {
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(
+                received_event,
+                RoomEvent::PowerUsed(
+                    Power::CheckAndSwapStage2(_, _),
+                    0,
+                    Some(2),
+                    Some(1),
+                    Some(3)
+                )
+            ));
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::PlayerTurn(1)));
+        }
+
+        room_commander.draw_card(1).await.unwrap();
+        players_rxs
+            .iter_mut()
+            .for_each(|rx| while rx.try_recv().is_ok() {});
+        room_commander.swap_card(1, 3).await.unwrap();
+        for player_rx in players_rxs.iter_mut() {
+            let received_event = get_nth_event(player_rx, 2).await;
+            assert!(
+                matches!(received_event, RoomEvent::CardDiscarded(1, card) if card == cards_1[2])
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn use_power_check_and_swap_decide_to_not_swap() {
+        let state = State::PowerStage(0, Power::CheckAndSwapStage2(1, 3));
+        let deck = Deck::new();
+        let cards_1 = vec![
+            Card::Clubs(1),
+            Card::Clubs(2),
+            Card::Clubs(3),
+            Card::Clubs(4),
+        ];
+        let cards_2 = vec![
+            Card::Diamonds(1),
+            Card::Diamonds(2),
+            Card::Diamonds(3),
+            Card::Diamonds(4),
+        ];
+
+        let (room_commander, mut players_rxs) =
+            init_specific_game_room(0, state, deck, cards_1.clone(), Some(cards_2.clone()));
+
+        room_commander.check_and_swap_stage2(0, None).await.unwrap();
+
+        for player_rx in players_rxs.iter_mut() {
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(
+                received_event,
+                RoomEvent::PowerUsed(Power::CheckAndSwapStage2(_, _), 0, None, Some(1), Some(3))
+            ));
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::PlayerTurn(1)));
+        }
+
+        room_commander.draw_card(1).await.unwrap();
+        players_rxs
+            .iter_mut()
+            .for_each(|rx| while rx.try_recv().is_ok() {});
+        room_commander.swap_card(1, 3).await.unwrap();
+        for player_rx in players_rxs.iter_mut() {
+            let received_event = get_nth_event(player_rx, 2).await;
+            assert!(
+                !matches!(received_event, RoomEvent::CardDiscarded(1, card) if card == cards_1[2])
             );
         }
     }

@@ -134,4 +134,37 @@ impl RoomCommander {
             .unwrap();
         cmd_rx.await.unwrap()
     }
+
+    pub async fn check_and_swap_stage1(
+        &self,
+        player_id: PlayerId,
+        other_player_id: PlayerId,
+        other_card_idx: usize,
+    ) -> Result<(), GameError> {
+        let (cmd_tx, cmd_rx) = oneshot::channel();
+        self.tx_channel
+            .send(RoomCommand::CheckAndSwapStage1 {
+                player_id,
+                other_player_id,
+                other_card_idx,
+                cmd_tx,
+            })
+            .unwrap();
+        cmd_rx.await.unwrap()
+    }
+    pub async fn check_and_swap_stage2(
+        &self,
+        player_id: PlayerId,
+        card_idx: Option<usize>,
+    ) -> Result<(), GameError> {
+        let (cmd_tx, cmd_rx) = oneshot::channel();
+        self.tx_channel
+            .send(RoomCommand::CheckAndSwapStage2 {
+                player_id,
+                card_idx,
+                cmd_tx,
+            })
+            .unwrap();
+        cmd_rx.await.unwrap()
+    }
 }
