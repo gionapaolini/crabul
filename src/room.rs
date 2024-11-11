@@ -83,6 +83,11 @@ pub enum RoomCommand {
         picked_card_idx: usize,
         cmd_tx: oneshot::Sender<Result<(), GameError>>,
     },
+    SelectCardToGiveAway {
+        player_id: PlayerId,
+        card_idx: usize,
+        cmd_tx: oneshot::Sender<Result<(), GameError>>,
+    },
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -92,6 +97,13 @@ pub enum Power {
     BlindSwap,
     CheckAndSwapStage1,
     CheckAndSwapStage2(PlayerId, usize),
+}
+
+#[derive(Clone)]
+pub enum SameCardResult {
+    Success,
+    NotTheSame,
+    TooLate,
 }
 
 #[derive(Clone)]
@@ -119,8 +131,8 @@ pub enum RoomEvent {
         Option<PlayerId>,
         Option<usize>,
     ),
-    SameCardThrown(PlayerId, PlayerId, usize, Card),
-    PenaltyCardNotTheSame(PlayerId, PlayerId, usize, Card),
+    SameCardAttempt(PlayerId, PlayerId, usize, Option<Card>, SameCardResult),
+    CardReplaced(PlayerId, usize, PlayerId, usize),
 }
 
 pub struct Player {
@@ -130,13 +142,14 @@ pub struct Player {
     ready: bool,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub enum State {
     NotStarted,
     PeekingPhase,
     StartTurn(PlayerId),
     MiddleTurn(PlayerId, Card),
     PowerStage(PlayerId, Power),
+    PauseForSameCardThrow(PlayerId, PlayerId, usize, Box<State>),
 }
 pub struct RoomServer {
     id: RoomId,
@@ -145,11 +158,30 @@ pub struct RoomServer {
     players: HashMap<PlayerId, Player>,
     deck: Deck,
     state: State,
+    same_card_thrown: bool,
     current_player_idx: usize,
     turn_order: HashMap<usize, PlayerId>,
 }
 
 impl RoomServer {
+    pub fn new() -> (Self, RoomCommander) {
+        let (tx_channel, rx_channel) = mpsc::unbounded_channel();
+
+        let room_server = Self {
+            id: thread_rng().gen::<RoomId>(),
+            tx_channel: tx_channel.clone(),
+            rx_channel,
+            players: HashMap::with_capacity(6),
+            deck: Deck::new(),
+            state: State::NotStarted,
+            same_card_thrown: false,
+            current_player_idx: 0,
+            turn_order: HashMap::with_capacity(6),
+        };
+
+        (room_server, RoomCommander::new(tx_channel))
+    }
+
     pub fn start() -> RoomCommander {
         let (tx_channel, rx_channel) = mpsc::unbounded_channel();
 
@@ -160,6 +192,7 @@ impl RoomServer {
             players: HashMap::with_capacity(6),
             deck: Deck::new(),
             state: State::NotStarted,
+            same_card_thrown: false,
             current_player_idx: 0,
             turn_order: HashMap::with_capacity(6),
         };
@@ -268,6 +301,14 @@ impl RoomServer {
                     let res = self.throw_same_card(player_id, picked_player_id, picked_card_idx);
                     let _ = cmd_tx.send(res);
                 }
+                RoomCommand::SelectCardToGiveAway {
+                    player_id,
+                    card_idx,
+                    cmd_tx,
+                } => {
+                    let res = self.select_card_to_give_away(player_id, card_idx);
+                    let _ = cmd_tx.send(res);
+                }
             }
         }
     }
@@ -369,6 +410,7 @@ impl RoomServer {
     }
 
     fn next_turn(&mut self) {
+        self.same_card_thrown = false;
         self.current_player_idx += 1;
         let idx = self.current_player_idx % self.players.len();
         let current_player_id = self.turn_order[&idx];
@@ -598,7 +640,20 @@ impl RoomServer {
             State::NotStarted | State::PeekingPhase => {
                 Err(GameError::OperationNotAllowedAtCurrentState)
             }
-            State::StartTurn(_) | State::MiddleTurn(_, _) | State::PowerStage(_, _) => {
+            State::StartTurn(_)
+            | State::MiddleTurn(_, _)
+            | State::PowerStage(_, _)
+            | State::PauseForSameCardThrow(_, _, _, _) => {
+                if self.same_card_thrown {
+                    self.give_penalty(
+                        player_id,
+                        picked_player_id,
+                        picked_card_idx,
+                        None,
+                        SameCardResult::TooLate,
+                    );
+                    return Ok(());
+                }
                 if let Some(discarded_card) = self.deck.get_last_discarded() {
                     self.validate_idx_card(picked_player_id, picked_card_idx)?;
                     let chosen_card = self.players[&picked_player_id].cards[picked_card_idx];
@@ -610,33 +665,100 @@ impl RoomServer {
                             .cards
                             .remove(picked_card_idx);
                         self.deck.discard(card);
-                        let event = RoomEvent::SameCardThrown(
+                        let event = RoomEvent::SameCardAttempt(
                             player_id,
                             picked_player_id,
                             picked_card_idx,
-                            card,
+                            Some(card),
+                            SameCardResult::Success,
                         );
                         self.send_all_players(event);
+                        self.same_card_thrown = true;
+                        if player_id != picked_player_id {
+                            self.state = State::PauseForSameCardThrow(
+                                player_id,
+                                picked_player_id,
+                                picked_card_idx,
+                                Box::new(self.state.clone()),
+                            )
+                        }
                     } else {
-                        let event = RoomEvent::PenaltyCardNotTheSame(
+                        self.give_penalty(
                             player_id,
                             picked_player_id,
                             picked_card_idx,
-                            chosen_card,
+                            Some(chosen_card),
+                            SameCardResult::NotTheSame,
                         );
-                        self.send_all_players(event);
-                        let new_card = self.deck.draw();
-                        self.players
-                            .get_mut(&player_id)
-                            .unwrap()
-                            .cards
-                            .push(new_card);
                     }
                 }
 
                 Ok(())
             }
         }
+    }
+
+    fn select_card_to_give_away(
+        &mut self,
+        player_id: PlayerId,
+        card_idx: usize,
+    ) -> Result<(), GameError> {
+        if let State::PauseForSameCardThrow(
+            stored_player_id,
+            other_player_id,
+            other_card_idx,
+            state,
+        ) = self.state.clone()
+        {
+            if player_id != stored_player_id {
+                return Err(GameError::OperationNotAllowedAtCurrentState);
+            }
+
+            self.validate_idx_card(stored_player_id, card_idx)?;
+
+            let card = self
+                .players
+                .get_mut(&player_id)
+                .unwrap()
+                .cards
+                .remove(card_idx);
+            self.players
+                .get_mut(&other_player_id)
+                .unwrap()
+                .cards
+                .insert(other_card_idx, card);
+
+            let event =
+                RoomEvent::CardReplaced(player_id, card_idx, other_player_id, other_card_idx);
+            self.send_all_players(event);
+            self.state = *state;
+            return Ok(());
+        }
+        Err(GameError::OperationNotAllowedAtCurrentState)
+    }
+
+    fn give_penalty(
+        &mut self,
+        player_id: u16,
+        picked_player_id: u16,
+        picked_card_idx: usize,
+        chosen_card: Option<Card>,
+        result: SameCardResult,
+    ) {
+        let event = RoomEvent::SameCardAttempt(
+            player_id,
+            picked_player_id,
+            picked_card_idx,
+            chosen_card,
+            result,
+        );
+        self.send_all_players(event);
+        let new_card = self.deck.draw();
+        self.players
+            .get_mut(&player_id)
+            .unwrap()
+            .cards
+            .push(new_card);
     }
 
     fn swap_players_card(
@@ -1263,41 +1385,97 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn throw_same_card() {
-        let state = State::StartTurn(0);
-        let mut deck = Deck::new();
-        deck.discard(Card::Hearts(1));
-        let cards_1 = vec![
-            Card::Clubs(1),
-            Card::Clubs(2),
-            Card::Clubs(3),
-            Card::Clubs(4),
-        ];
+    async fn throw_own_same_card() {
+        let (mut server, _, mut players_rxs) = get_basic_server();
+        server.state = State::StartTurn(0);
+        server.deck.discard(Card::Clubs(1));
+        server
+            .players
+            .get_mut(&1)
+            .unwrap()
+            .cards
+            .push(Card::Diamonds(1));
 
-        let (room_commander, mut players_rxs) =
-            init_specific_game_room(0, state, deck, cards_1.clone(), None);
-
-        room_commander.throw_same_card(1, 0, 0).await.unwrap();
+        server.throw_same_card(1, 1, 0).unwrap();
 
         for player_rx in players_rxs.iter_mut() {
             let received_event = get_nth_event(player_rx, 1).await;
             assert!(matches!(
                 received_event,
-                RoomEvent::SameCardThrown(1,0,0,card) if card==cards_1[0]
+                RoomEvent::SameCardAttempt(
+                    1,
+                    1,
+                    0,
+                    Some(Card::Diamonds(1)),
+                    SameCardResult::Success
+                )
             ));
         }
 
-        room_commander.draw_card(0).await.unwrap();
-        players_rxs
-            .iter_mut()
-            .for_each(|rx| while rx.try_recv().is_ok() {});
-        room_commander.swap_card(0, 0).await.unwrap();
+        assert!(server.players.get(&1).unwrap().cards.is_empty());
+    }
+
+    #[tokio::test]
+    async fn throw_someone_else_same_card() {
+        let (mut server, _, mut players_rxs) = get_basic_server();
+        server.state = State::StartTurn(0);
+        server.deck.discard(Card::Clubs(1));
+        server
+            .players
+            .get_mut(&0)
+            .unwrap()
+            .cards
+            .push(Card::Diamonds(1));
+        server
+            .players
+            .get_mut(&1)
+            .unwrap()
+            .cards
+            .push(Card::Hearts(2));
+        server
+            .players
+            .get_mut(&1)
+            .unwrap()
+            .cards
+            .push(Card::Hearts(3));
+
+        server.throw_same_card(1, 0, 0).unwrap();
+
         for player_rx in players_rxs.iter_mut() {
-            let received_event = get_nth_event(player_rx, 2).await;
-            assert!(
-                !matches!(received_event, RoomEvent::CardDiscarded(1, card) if card == cards_1[1])
-            );
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(
+                received_event,
+                RoomEvent::SameCardAttempt(
+                    1,
+                    0,
+                    0,
+                    Some(Card::Diamonds(1)),
+                    SameCardResult::Success
+                )
+            ));
         }
+
+        assert!(server.players.get(&0).unwrap().cards.is_empty());
+        assert!(matches!(
+            server.state.clone(),
+            State::PauseForSameCardThrow(1, 0, 0, state) if *state == State::StartTurn(0)));
+
+        server.select_card_to_give_away(1, 0).unwrap();
+
+        for player_rx in players_rxs.iter_mut() {
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(
+                received_event,
+                RoomEvent::CardReplaced(1, 0, 0, 0)
+            ));
+        }
+
+        assert!(server.players.get(&0).unwrap().cards.len() == 1);
+        assert!(server.players.get(&0).unwrap().cards[0] == Card::Hearts(2));
+        assert!(server.players.get(&1).unwrap().cards.len() == 1);
+        assert!(server.players.get(&1).unwrap().cards[0] == Card::Hearts(3));
+
+        assert!(matches!(server.state, State::StartTurn(0)));
     }
 
     #[tokio::test]
@@ -1321,7 +1499,7 @@ mod tests {
             let received_event = get_nth_event(player_rx, 1).await;
             assert!(matches!(
                 received_event,
-                RoomEvent::PenaltyCardNotTheSame(5,0,0,card) if card==cards_1[0]
+                RoomEvent::SameCardAttempt(5,0,0,Some(card),SameCardResult::NotTheSame) if card==cards_1[0]
             ));
         }
 
@@ -1338,6 +1516,35 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn throw_same_card_penalty_when_someone_already_threw_one() {
+        let (mut server, _, mut players_rxs) = get_basic_server();
+        server.state = State::StartTurn(0);
+        server.deck.discard(Card::Clubs(1));
+        server
+            .players
+            .get_mut(&1)
+            .unwrap()
+            .cards
+            .push(Card::Diamonds(1));
+
+        server.throw_same_card(1, 1, 0).unwrap();
+        players_rxs
+            .iter_mut()
+            .for_each(|rx| while rx.try_recv().is_ok() {});
+        server.throw_same_card(0, 1, 0).unwrap();
+
+        for player_rx in players_rxs.iter_mut() {
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(
+                received_event,
+                RoomEvent::SameCardAttempt(0, 1, 0, None, SameCardResult::TooLate)
+            ));
+        }
+
+        assert!(server.players.get(&1).unwrap().cards.is_empty());
+        assert!(server.players.get(&0).unwrap().cards.len() == 1);
+    }
     // UTILS
     async fn get_nth_event(rcv: &mut UnboundedReceiver<RoomEvent>, nth: u8) -> RoomEvent {
         for _ in 1..nth {
@@ -1407,6 +1614,7 @@ mod tests {
             players,
             deck,
             state,
+            same_card_thrown: false,
             current_player_idx,
             turn_order: HashMap::from([(0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5)]),
         };
@@ -1430,5 +1638,27 @@ mod tests {
             },
             rx_channel,
         )
+    }
+
+    fn get_basic_server() -> (RoomServer, RoomCommander, Vec<UnboundedReceiver<RoomEvent>>) {
+        let (mut server, commander) = RoomServer::new();
+        let mut player_rxs = vec![];
+
+        for i in 0..6 {
+            let (tx, rx) = mpsc::unbounded_channel();
+            server.players.insert(
+                i,
+                Player {
+                    name: format!("p{i}"),
+                    tx,
+                    cards: vec![],
+                    ready: true,
+                },
+            );
+            server.turn_order.insert(i as usize, i);
+            player_rxs.push(rx);
+        }
+
+        (server, commander, player_rxs)
     }
 }

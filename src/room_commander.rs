@@ -185,4 +185,20 @@ impl RoomCommander {
             .unwrap();
         cmd_rx.await.unwrap()
     }
+
+    pub async fn select_card_to_give_away(
+        &self,
+        player_id: PlayerId,
+        card_idx: usize,
+    ) -> Result<(), GameError> {
+        let (cmd_tx, cmd_rx) = oneshot::channel();
+        self.tx_channel
+            .send(RoomCommand::SelectCardToGiveAway {
+                player_id,
+                card_idx,
+                cmd_tx,
+            })
+            .unwrap();
+        cmd_rx.await.unwrap()
+    }
 }
