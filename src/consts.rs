@@ -12,6 +12,7 @@ pub enum GameError {
 pub const MIN_PLAYERS: usize = 2;
 pub const MAX_PLAYERS: usize = 6;
 pub const PEEKING_PHASE_COUNTDOWN: Duration = Duration::from_secs(30);
+pub const TURN_COUNTDOWN: Duration = Duration::from_secs(60);
 
 pub type RoomId = u16;
 pub type PlayerId = u16;

@@ -73,3 +73,10 @@ impl Deck {
         self.discard_pile.last()
     }
 }
+
+pub fn testing_deck(cards: Vec<Card>) -> Deck {
+    Deck {
+        cards,
+        discard_pile: vec![],
+    }
+}

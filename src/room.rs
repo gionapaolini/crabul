@@ -1,6 +1,6 @@
 use std::{collections::HashMap, mem};
 
-use rand::{thread_rng, Rng};
+use rand::{seq::IteratorRandom, thread_rng, Rng};
 use tokio::{
     spawn,
     sync::{
@@ -13,6 +13,7 @@ use tokio::{
 use crate::{
     consts::{
         GameError, PlayerId, PlayerName, RoomId, MAX_PLAYERS, MIN_PLAYERS, PEEKING_PHASE_COUNTDOWN,
+        TURN_COUNTDOWN,
     },
     deck::{Card, Deck},
     room_commander::RoomCommander,
@@ -93,6 +94,7 @@ pub enum RoomCommand {
         cmd_tx: oneshot::Sender<Result<(), GameError>>,
     },
     StopRoomServer,
+    ForceEndTurn(PlayerId),
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -153,6 +155,9 @@ pub enum RoomEvent {
     CardReplaced(PlayerId, usize, PlayerId, usize),
     PlayerWentCrabul(PlayerId),
     GameTerminated(FinalScore),
+    TurnEndedByTimeout(PlayerId),
+    PowerDiscarded(PlayerId, Power),
+    ForcedBlindSwap(PlayerId, usize, PlayerId, usize),
 }
 
 pub struct Player {
@@ -329,6 +334,9 @@ impl RoomServer {
                     let _ = cmd_tx.send(res);
                 }
                 RoomCommand::StopRoomServer => break,
+                RoomCommand::ForceEndTurn(player_id) => {
+                    self.force_end_turn(player_id);
+                }
             }
         }
     }
@@ -462,6 +470,11 @@ impl RoomServer {
 
         let event = RoomEvent::PlayerTurn(current_player_id);
         self.send_all_players(event);
+
+        spawn(Self::turn_countdown(
+            current_player_id,
+            self.tx_channel.clone(),
+        ));
     }
 
     fn finalize_game(&mut self) {
@@ -818,6 +831,86 @@ impl RoomServer {
             .push(new_card);
     }
 
+    fn force_end_turn(&mut self, player_id: PlayerId) {
+        if self.turn_order[&self.current_player_idx] != player_id {
+            return;
+        }
+        match self.state {
+            State::NotStarted | State::PeekingPhase | State::Terminated => {}
+            State::StartTurn(_) => {
+                let event = RoomEvent::TurnEndedByTimeout(player_id);
+                self.send_all_players(event);
+                let card = self.deck.draw();
+                let event = RoomEvent::CardWasDrawn(player_id);
+                self.send_all_players(event);
+                self.auto_discard_drawn_card(card, player_id);
+            }
+            State::MiddleTurn(_, card) => {
+                let event = RoomEvent::TurnEndedByTimeout(player_id);
+                self.send_all_players(event);
+                self.auto_discard_drawn_card(card, player_id);
+            }
+            State::PowerStage(_, power) => {
+                let event = RoomEvent::TurnEndedByTimeout(player_id);
+                self.send_all_players(event);
+                self.discard_power(player_id, power);
+                self.next_turn();
+            }
+            State::PauseForSameCardThrow(_, _, _, _) => {
+                //reset timer;
+                spawn(Self::turn_countdown(player_id, self.tx_channel.clone()));
+            }
+        }
+    }
+
+    fn discard_power(&mut self, player_id: PlayerId, power: Power) {
+        match power {
+            Power::PeekOwnCard
+            | Power::PeekOtherCard
+            | Power::CheckAndSwapStage1
+            | Power::CheckAndSwapStage2(..) => {
+                let event = RoomEvent::PowerDiscarded(player_id, power);
+                self.send_all_players(event);
+            }
+            Power::BlindSwap => {
+                let rng = &mut rand::thread_rng();
+                let (other_player_id, other_player) = self
+                    .players
+                    .iter()
+                    .filter(|(id, _)| **id != player_id)
+                    .choose(rng)
+                    .unwrap();
+                let card_idx = rng.gen_range(0..self.players[&player_id].cards.len());
+                let other_card_idx = rng.gen_range(0..other_player.cards.len());
+
+                let other_player_id = *other_player_id;
+
+                self.swap_players_card(player_id, card_idx, other_player_id, other_card_idx)
+                    .unwrap();
+
+                let event = RoomEvent::ForcedBlindSwap(
+                    player_id,
+                    card_idx,
+                    other_player_id,
+                    other_card_idx,
+                );
+                self.send_all_players(event);
+            }
+        }
+    }
+
+    fn auto_discard_drawn_card(&mut self, card: Card, player_id: u16) {
+        self.deck.discard(card);
+        let event = RoomEvent::CardDiscarded(player_id, card);
+        self.send_all_players(event);
+
+        if let Some(power) = self.match_power(card) {
+            self.discard_power(player_id, power);
+        }
+
+        self.next_turn();
+    }
+
     fn swap_players_card(
         &mut self,
         player_id_1: PlayerId,
@@ -899,15 +992,20 @@ impl RoomServer {
         sleep(PEEKING_PHASE_COUNTDOWN).await;
         let _ = tx_channel.send(RoomCommand::NextTurn);
     }
+
+    async fn turn_countdown(player_id: PlayerId, tx_channel: UnboundedSender<RoomCommand>) {
+        sleep(TURN_COUNTDOWN).await;
+        let _ = tx_channel.send(RoomCommand::ForceEndTurn(player_id));
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{ops::Add, time::Duration};
 
     use tokio::time::pause;
 
-    use crate::room_commander::RoomCommander;
+    use crate::{consts::TURN_COUNTDOWN, deck, room_commander::RoomCommander};
 
     use super::*;
 
@@ -1805,6 +1903,127 @@ mod tests {
                 panic!("Game not terminated");
             }
             assert!(player_rx.is_closed());
+        }
+    }
+
+    #[tokio::test]
+    async fn turn_timeout() {
+        pause();
+        let (mut server, commander, mut players_rxs) = get_basic_server();
+        for (_, player) in server.players.iter_mut() {
+            player
+                .cards
+                .extend_from_slice(&[Card::Clubs(10), Card::Clubs(10)]);
+        }
+        let special_deck = deck::testing_deck(vec![Card::Clubs(2), Card::Clubs(3)]);
+        server.deck = special_deck;
+        server.current_player_idx = 0;
+        server.state = State::StartTurn(0);
+        server.draw_card(0).unwrap();
+        spawn(server.run());
+        commander.swap_card(0, 0).await.unwrap();
+
+        players_rxs
+            .iter_mut()
+            .for_each(|rx| while rx.try_recv().is_ok() {});
+
+        sleep(TURN_COUNTDOWN.add(Duration::from_secs(1))).await;
+
+        for player_rx in players_rxs.iter_mut() {
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::TurnEndedByTimeout(1)));
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::CardWasDrawn(1)));
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(
+                received_event,
+                RoomEvent::CardDiscarded(1, Card::Clubs(2))
+            ));
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::PlayerTurn(2)));
+        }
+    }
+
+    #[tokio::test]
+    async fn turn_timeout_when_card_has_power() {
+        pause();
+        let (mut server, commander, mut players_rxs) = get_basic_server();
+        for (_, player) in server.players.iter_mut() {
+            player
+                .cards
+                .extend_from_slice(&[Card::Clubs(10), Card::Clubs(10)]);
+        }
+        let special_deck = deck::testing_deck(vec![Card::Clubs(7), Card::Clubs(3)]);
+        server.deck = special_deck;
+        server.current_player_idx = 0;
+        server.state = State::StartTurn(0);
+        server.draw_card(0).unwrap();
+        spawn(server.run());
+        commander.swap_card(0, 0).await.unwrap();
+
+        players_rxs
+            .iter_mut()
+            .for_each(|rx| while rx.try_recv().is_ok() {});
+
+        sleep(TURN_COUNTDOWN.add(Duration::from_secs(1))).await;
+
+        for player_rx in players_rxs.iter_mut() {
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::TurnEndedByTimeout(1)));
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::CardWasDrawn(1)));
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(
+                received_event,
+                RoomEvent::CardDiscarded(1, Card::Clubs(7))
+            ));
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(
+                received_event,
+                RoomEvent::PowerDiscarded(1, Power::PeekOwnCard)
+            ));
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::PlayerTurn(2)));
+        }
+    }
+
+    #[tokio::test]
+    async fn turn_timeout_when_card_has_power_and_power_is_blind_swap() {
+        pause();
+        let (mut server, commander, mut players_rxs) = get_basic_server();
+        for (_, player) in server.players.iter_mut() {
+            player
+                .cards
+                .extend_from_slice(&[Card::Clubs(10), Card::Clubs(10)]);
+        }
+        let special_deck = deck::testing_deck(vec![Card::Clubs(11), Card::Clubs(3)]);
+        server.deck = special_deck;
+        server.current_player_idx = 0;
+        server.state = State::StartTurn(0);
+        server.draw_card(0).unwrap();
+        spawn(server.run());
+        commander.swap_card(0, 0).await.unwrap();
+
+        players_rxs
+            .iter_mut()
+            .for_each(|rx| while rx.try_recv().is_ok() {});
+
+        sleep(TURN_COUNTDOWN.add(Duration::from_secs(1))).await;
+
+        for player_rx in players_rxs.iter_mut() {
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::TurnEndedByTimeout(1)));
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::CardWasDrawn(1)));
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(
+                received_event,
+                RoomEvent::CardDiscarded(1, Card::Clubs(11))
+            ));
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::ForcedBlindSwap(1, ..)));
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::PlayerTurn(2)));
         }
     }
 
