@@ -129,6 +129,7 @@ pub enum RoomEvent {
         room_id: RoomId,
         player_id: PlayerId,
         player_name: PlayerName,
+        player_list: HashMap<PlayerId, PlayerName>,
     },
     PlayerLeft(PlayerId),
     GameStarted,
@@ -398,6 +399,11 @@ impl RoomServer {
             room_id: self.id,
             player_id,
             player_name: name,
+            player_list: self
+                .players
+                .iter()
+                .map(|(id, player)| (*id, player.name.clone()))
+                .collect(),
         };
 
         self.send_all_players(event);
@@ -911,9 +917,18 @@ mod tests {
         let mut players = create_n_players(&mut room_commander, 1, false).await;
 
         let received_event = get_nth_event(&mut players[0].1, 1).await;
-        assert!(
-            matches!(received_event, RoomEvent::PlayerJoined { room_id: _, player_id: received_player_id, player_name: received_player_name} if received_player_id==players[0].0 && received_player_name=="name_0")
-        );
+
+        if let RoomEvent::PlayerJoined {
+            room_id: _,
+            player_id,
+            player_name,
+            player_list,
+        } = received_event
+        {
+            assert!(player_id == players[0].0);
+            assert!(player_name == "name_0");
+            assert!(player_list == HashMap::from([(players[0].0, "name_0".into())]));
+        }
     }
 
     #[tokio::test]
@@ -922,9 +937,23 @@ mod tests {
         let mut players = create_n_players(&mut room_commander, 2, false).await;
 
         let received_event = get_nth_event(&mut players[0].1, 2).await;
-        assert!(
-            matches!(received_event, RoomEvent::PlayerJoined { room_id: _, player_id: received_player_id, player_name: received_player_name} if received_player_id==players[1].0 && received_player_name=="name_1")
-        );
+        if let RoomEvent::PlayerJoined {
+            room_id: _,
+            player_id,
+            player_name,
+            player_list,
+        } = received_event
+        {
+            assert!(player_id == players[1].0);
+            assert!(player_name == "name_1");
+            assert!(
+                player_list
+                    == HashMap::from([
+                        (players[0].0, "name_0".into()),
+                        (players[1].0, "name_1".into())
+                    ])
+            );
+        }
     }
 
     #[tokio::test]
