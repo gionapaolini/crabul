@@ -92,6 +92,7 @@ pub enum RoomCommand {
         card_idx: usize,
         cmd_tx: oneshot::Sender<Result<(), GameError>>,
     },
+    StopRoomServer,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -108,6 +109,18 @@ pub enum SameCardResult {
     Success,
     NotTheSame,
     TooLate,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct Score {
+    player_id: PlayerId,
+    cards: Vec<Card>,
+    total_score: i8,
+}
+#[derive(Clone)]
+pub struct FinalScore {
+    pub winner: PlayerId,
+    pub scores: Vec<Score>,
 }
 
 #[derive(Clone)]
@@ -138,6 +151,7 @@ pub enum RoomEvent {
     SameCardAttempt(PlayerId, PlayerId, usize, Option<Card>, SameCardResult),
     CardReplaced(PlayerId, usize, PlayerId, usize),
     PlayerWentCrabul(PlayerId),
+    GameTerminated(FinalScore),
 }
 
 pub struct Player {
@@ -155,6 +169,7 @@ pub enum State {
     MiddleTurn(PlayerId, Card),
     PowerStage(PlayerId, Power),
     PauseForSameCardThrow(PlayerId, PlayerId, usize, Box<State>),
+    Terminated,
 }
 pub struct RoomServer {
     id: RoomId,
@@ -312,6 +327,7 @@ impl RoomServer {
                     let res = self.select_card_to_give_away(player_id, card_idx);
                     let _ = cmd_tx.send(res);
                 }
+                RoomCommand::StopRoomServer => break,
             }
         }
     }
@@ -428,10 +444,43 @@ impl RoomServer {
         self.current_player_idx += 1;
         let idx = self.current_player_idx % self.players.len();
         let current_player_id = self.turn_order[&idx];
+
+        if let Some(crabul_player) = self.crabul_player {
+            if current_player_id == crabul_player {
+                self.finalize_game();
+                return;
+            }
+        }
+
         self.state = State::StartTurn(current_player_id);
 
         let event = RoomEvent::PlayerTurn(current_player_id);
         self.send_all_players(event);
+    }
+
+    fn finalize_game(&mut self) {
+        let scores = self.players.iter().map(|(player_id, player)| Score {
+            player_id: *player_id,
+            cards: player.cards.clone(),
+            total_score: player.cards.iter().map(|card| card.get_score()).sum(),
+        });
+        self.state = State::Terminated;
+
+        let mut sorted_scores: Vec<Score> = scores.collect();
+        sorted_scores.sort_by(|a, b| a.total_score.cmp(&b.total_score));
+        let (winner1, winner2) = (sorted_scores[0].clone(), sorted_scores[1].clone());
+        let mut final_winner = winner1.clone();
+
+        if winner1 == winner2 && winner1.player_id == self.crabul_player.unwrap() {
+            final_winner = winner2
+        }
+
+        let event = RoomEvent::GameTerminated(FinalScore {
+            winner: final_winner.player_id,
+            scores: sorted_scores,
+        });
+        self.send_all_players(event);
+        let _ = self.tx_channel.send(RoomCommand::StopRoomServer);
     }
 
     fn draw_card(&mut self, player_id: PlayerId) -> Result<Card, GameError> {
@@ -639,7 +688,7 @@ impl RoomServer {
         picked_card_idx: usize,
     ) -> Result<(), GameError> {
         match self.state {
-            State::NotStarted | State::PeekingPhase => {
+            State::NotStarted | State::PeekingPhase | State::Terminated => {
                 Err(GameError::OperationNotAllowedAtCurrentState)
             }
             State::StartTurn(_)
@@ -1628,6 +1677,106 @@ mod tests {
             server.check_and_swap_stage1(0, 1, 0),
             Err(GameError::OperationNotAllowedAtCurrentState)
         ));
+    }
+
+    #[tokio::test]
+    async fn end_game_when_turn_reaches_crabul_player() {
+        let (mut server, _, mut players_rxs) = get_basic_server();
+
+        for (_, player) in server.players.iter_mut() {
+            player
+                .cards
+                .extend_from_slice(&[Card::Clubs(10), Card::Clubs(10)]);
+        }
+
+        server.players.get_mut(&0).unwrap().cards.clear();
+        server
+            .players
+            .get_mut(&0)
+            .unwrap()
+            .cards
+            .extend_from_slice(&[Card::Hearts(13), Card::Diamonds(1), Card::Joker]);
+
+        server.crabul_player = Some(0);
+        server.current_player_idx = 5;
+        server.state = State::StartTurn(5);
+        server.draw_card(5).unwrap();
+        server.state = State::MiddleTurn(5, Card::Clubs(10));
+        players_rxs
+            .iter_mut()
+            .for_each(|rx| while rx.try_recv().is_ok() {});
+
+        server.swap_card(5, 0).unwrap();
+
+        for player_rx in players_rxs.iter_mut() {
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::CardSwapped(..)));
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::CardDiscarded(..)));
+            let received_event = get_nth_event(player_rx, 1).await;
+            if let RoomEvent::GameTerminated(score) = received_event {
+                assert!(score.winner == 0);
+                assert!(score.scores[0].total_score == 0);
+                assert!(score.scores[1].total_score == 20);
+
+                assert!(
+                    score.scores[0].cards == vec![Card::Hearts(13), Card::Diamonds(1), Card::Joker]
+                );
+            } else {
+                panic!("Game not terminated");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn room_terminate_when_game_is_over() {
+        let (mut server, commander, mut players_rxs) = get_basic_server();
+
+        for (_, player) in server.players.iter_mut() {
+            player
+                .cards
+                .extend_from_slice(&[Card::Clubs(10), Card::Clubs(10)]);
+        }
+
+        server.players.get_mut(&0).unwrap().cards.clear();
+        server
+            .players
+            .get_mut(&0)
+            .unwrap()
+            .cards
+            .extend_from_slice(&[Card::Hearts(13), Card::Diamonds(1), Card::Joker]);
+
+        server.crabul_player = Some(0);
+        server.current_player_idx = 5;
+        server.state = State::StartTurn(5);
+        server.draw_card(5).unwrap();
+        server.state = State::MiddleTurn(5, Card::Clubs(10));
+        players_rxs
+            .iter_mut()
+            .for_each(|rx| while rx.try_recv().is_ok() {});
+
+        spawn(server.run());
+        commander.swap_card(5, 0).await.unwrap();
+
+        for player_rx in players_rxs.iter_mut() {
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::CardSwapped(..)));
+            let received_event = get_nth_event(player_rx, 1).await;
+            assert!(matches!(received_event, RoomEvent::CardDiscarded(..)));
+            let received_event = get_nth_event(player_rx, 1).await;
+            if let RoomEvent::GameTerminated(score) = received_event {
+                assert!(score.winner == 0);
+                assert!(score.scores[0].total_score == 0);
+                assert!(score.scores[1].total_score == 20);
+
+                assert!(
+                    score.scores[0].cards == vec![Card::Hearts(13), Card::Diamonds(1), Card::Joker]
+                );
+            } else {
+                panic!("Game not terminated");
+            }
+            assert!(player_rx.is_closed());
+        }
     }
 
     // UTILS

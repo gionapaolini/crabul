@@ -18,6 +18,13 @@ impl Card {
             Card::Joker => None,
         }
     }
+    pub fn get_score(&self) -> i8 {
+        match self {
+            Card::Hearts(13) => -1,
+            Card::Joker => 0,
+            Card::Clubs(n) | Card::Diamonds(n) | Card::Hearts(n) | Card::Spade(n) => *n as i8,
+        }
+    }
 }
 
 pub struct Deck {
