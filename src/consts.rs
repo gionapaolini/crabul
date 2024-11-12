@@ -1,12 +1,15 @@
 use std::time::Duration;
 
-#[derive(Debug)]
+use serde::Serialize;
+
+#[derive(Serialize, Debug)]
 pub enum GameError {
     NameAlreadyExists,
     NotEnoughPlayers,
     TooManyPlayers,
     OperationNotAllowedAtCurrentState,
     InvalidCardIndex,
+    UnableToParseCommand,
 }
 
 pub const MIN_PLAYERS: usize = 2;

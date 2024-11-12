@@ -1,6 +1,7 @@
 use std::{collections::HashMap, mem};
 
 use rand::{seq::IteratorRandom, thread_rng, Rng};
+use serde::Serialize;
 use tokio::{
     spawn,
     sync::{
@@ -42,7 +43,7 @@ pub enum RoomCommand {
     },
     DrawCard {
         player_id: PlayerId,
-        cmd_tx: oneshot::Sender<Result<Card, GameError>>,
+        cmd_tx: oneshot::Sender<Result<(), GameError>>,
     },
     SwapCard {
         player_id: PlayerId,
@@ -97,7 +98,7 @@ pub enum RoomCommand {
     ForceEndTurn(PlayerId),
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Serialize, Copy, Clone, PartialEq)]
 pub enum Power {
     PeekOwnCard,
     PeekOtherCard,
@@ -106,26 +107,26 @@ pub enum Power {
     CheckAndSwapStage2(PlayerId, usize),
 }
 
-#[derive(Clone)]
+#[derive(Serialize, Clone)]
 pub enum SameCardResult {
     Success,
     NotTheSame,
     TooLate,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Serialize, Clone, PartialEq)]
 pub struct Score {
     player_id: PlayerId,
     cards: Vec<Card>,
     total_score: i8,
 }
-#[derive(Clone)]
+#[derive(Serialize, Clone)]
 pub struct FinalScore {
     pub winner: PlayerId,
     pub scores: Vec<Score>,
 }
 
-#[derive(Clone)]
+#[derive(Serialize, Clone)]
 pub enum RoomEvent {
     PlayerJoined {
         room_id: RoomId,
@@ -210,11 +211,12 @@ impl RoomServer {
         (room_server, RoomCommander::new(tx_channel))
     }
 
-    pub fn start() -> RoomCommander {
+    pub fn start() -> (RoomId, RoomCommander) {
         let (tx_channel, rx_channel) = mpsc::unbounded_channel();
 
+        let id = thread_rng().gen::<RoomId>();
         let room_server = Self {
-            id: thread_rng().gen::<RoomId>(),
+            id,
             tx_channel: tx_channel.clone(),
             rx_channel,
             players: HashMap::with_capacity(6),
@@ -228,7 +230,7 @@ impl RoomServer {
 
         spawn(room_server.run());
 
-        RoomCommander::new(tx_channel)
+        (id, RoomCommander::new(tx_channel))
     }
 
     async fn run(mut self) {
@@ -421,9 +423,11 @@ impl RoomServer {
 
     fn remove_player(&mut self, id: PlayerId) {
         self.players.remove(&id);
-
+        if self.players.is_empty() {
+            let _ = self.tx_channel.send(RoomCommand::StopRoomServer);
+            return;
+        }
         let event = RoomEvent::PlayerLeft(id);
-
         self.send_all_players(event);
     }
 
@@ -456,8 +460,8 @@ impl RoomServer {
     fn next_turn(&mut self) {
         self.same_card_thrown = false;
         self.current_player_idx += 1;
-        let idx = self.current_player_idx % self.players.len();
-        let current_player_id = self.turn_order[&idx];
+        self.current_player_idx %= self.players.len();
+        let current_player_id = self.turn_order[&self.current_player_idx];
 
         if let Some(crabul_player) = self.crabul_player {
             if current_player_id == crabul_player {
@@ -502,7 +506,7 @@ impl RoomServer {
         let _ = self.tx_channel.send(RoomCommand::StopRoomServer);
     }
 
-    fn draw_card(&mut self, player_id: PlayerId) -> Result<Card, GameError> {
+    fn draw_card(&mut self, player_id: PlayerId) -> Result<(), GameError> {
         if self.state != State::StartTurn(player_id) {
             return Err(GameError::OperationNotAllowedAtCurrentState);
         }
@@ -515,7 +519,7 @@ impl RoomServer {
         let event = RoomEvent::DrawnCard(card);
         self.send_to_player(player_id, event);
 
-        Ok(card)
+        Ok(())
     }
 
     fn swap_card(&mut self, player_id: PlayerId, card_idx: usize) -> Result<(), GameError> {
@@ -1011,7 +1015,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_player() {
-        let mut room_commander = RoomServer::start();
+        let (_, mut room_commander) = RoomServer::start();
         let mut players = create_n_players(&mut room_commander, 1, false).await;
 
         let received_event = get_nth_event(&mut players[0].1, 1).await;
@@ -1031,7 +1035,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_player_previous_player_should_receive_the_join_event() {
-        let mut room_commander = RoomServer::start();
+        let (_, mut room_commander) = RoomServer::start();
         let mut players = create_n_players(&mut room_commander, 2, false).await;
 
         let received_event = get_nth_event(&mut players[0].1, 2).await;
@@ -1056,7 +1060,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_player_should_fail_when_name_exists() {
-        let room_commander = RoomServer::start();
+        let (_, room_commander) = RoomServer::start();
         let (player_name_1, player_name_2) = ("name1", "name1");
         let _ = room_commander
             .new_player(player_name_1.into())
@@ -1069,7 +1073,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_player_should_fail_when_there_are_too_many_players() {
-        let mut room_commander = RoomServer::start();
+        let (_, mut room_commander) = RoomServer::start();
         create_n_players(&mut room_commander, 6, false).await;
         let res = room_commander.new_player("name_7".into()).await;
 
@@ -1078,7 +1082,7 @@ mod tests {
 
     #[tokio::test]
     async fn remove_player() {
-        let mut room_commander: RoomCommander = RoomServer::start();
+        let (_, mut room_commander) = RoomServer::start();
         let mut players = create_n_players(&mut room_commander, 3, false).await;
         room_commander.remove_player(players[2].0).await;
 
@@ -1095,7 +1099,7 @@ mod tests {
 
     #[tokio::test]
     async fn start_game_should_fail_when_not_enough_players() {
-        let mut room_commander = RoomServer::start();
+        let (_, mut room_commander) = RoomServer::start();
         create_n_players(&mut room_commander, 1, false).await;
         assert!(matches!(
             room_commander.start_game().await,
@@ -1105,7 +1109,7 @@ mod tests {
 
     #[tokio::test]
     async fn start_game() {
-        let mut room_commander = RoomServer::start();
+        let (_, mut room_commander) = RoomServer::start();
         let mut players = create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
 
@@ -1120,7 +1124,7 @@ mod tests {
 
     #[tokio::test]
     async fn cannot_start_game_if_state_different_from_not_started() {
-        let mut room_commander = RoomServer::start();
+        let (_, mut room_commander) = RoomServer::start();
         create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
         assert!(matches!(
@@ -1131,7 +1135,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_player_should_fail_when_game_started() {
-        let mut room_commander = RoomServer::start();
+        let (_, mut room_commander) = RoomServer::start();
         create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
 
@@ -1143,7 +1147,7 @@ mod tests {
 
     #[tokio::test]
     async fn start_turn_when_everyone_is_ready() {
-        let mut room_commander = RoomServer::start();
+        let (_, mut room_commander) = RoomServer::start();
         let mut players = create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
 
@@ -1164,7 +1168,7 @@ mod tests {
     #[tokio::test]
     async fn cannot_set_ready_when_stage_is_not_peeking_phase() {
         pause();
-        let mut room_commander = RoomServer::start();
+        let (_, mut room_commander) = RoomServer::start();
         let mut players = create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
 
@@ -1182,7 +1186,7 @@ mod tests {
     #[tokio::test]
     async fn automatic_start_turn_after_timeout() {
         pause();
-        let mut room_commander = RoomServer::start();
+        let (_, mut room_commander) = RoomServer::start();
         let mut players = create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
 
@@ -1199,7 +1203,7 @@ mod tests {
     #[tokio::test]
     async fn draw_card() {
         pause();
-        let mut room_commander = RoomServer::start();
+        let (_, mut room_commander) = RoomServer::start();
         let mut players = create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
 
@@ -1225,7 +1229,7 @@ mod tests {
     #[tokio::test]
     async fn swap_card() {
         pause();
-        let mut room_commander = RoomServer::start();
+        let (_, mut room_commander) = RoomServer::start();
         let mut players = create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
 
@@ -1904,6 +1908,17 @@ mod tests {
             }
             assert!(player_rx.is_closed());
         }
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn room_terminate_when_no_players_left() {
+        let (server, commander, _) = get_basic_server();
+        spawn(server.run());
+        for i in 0..6 {
+            commander.remove_player(i).await;
+        }
+        let _ = commander.new_player("test".into()).await;
     }
 
     #[tokio::test]

@@ -4,13 +4,13 @@ use tokio::sync::{
 };
 
 use crate::{
-    consts::{GameError, PlayerId},
-    deck::Card,
+    consts::{GameError, PlayerId, PlayerName},
     room::{RoomCommand, RoomEvent},
 };
 
+#[derive(Clone)]
 pub struct RoomCommander {
-    tx_channel: UnboundedSender<RoomCommand>,
+    pub tx_channel: UnboundedSender<RoomCommand>,
 }
 
 impl RoomCommander {
@@ -19,7 +19,7 @@ impl RoomCommander {
     }
     pub async fn new_player(
         &self,
-        name: String,
+        name: PlayerName,
     ) -> Result<(PlayerId, UnboundedReceiver<RoomEvent>), GameError> {
         let (cmd_tx, cmd_rx) = oneshot::channel();
         self.tx_channel
@@ -64,7 +64,7 @@ impl RoomCommander {
             .unwrap();
         cmd_rx.await.unwrap()
     }
-    pub async fn draw_card(&self, id: PlayerId) -> Result<Card, GameError> {
+    pub async fn draw_card(&self, id: PlayerId) -> Result<(), GameError> {
         let (cmd_tx, cmd_rx) = oneshot::channel();
         self.tx_channel
             .send(RoomCommand::DrawCard {
