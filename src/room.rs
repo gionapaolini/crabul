@@ -8,6 +8,7 @@ use tokio::{
         mpsc::{self, UnboundedReceiver, UnboundedSender},
         oneshot,
     },
+    task::JoinHandle,
     time::sleep,
 };
 
@@ -189,6 +190,7 @@ pub struct RoomServer {
     current_player_idx: usize,
     turn_order: HashMap<usize, PlayerId>,
     crabul_player: Option<PlayerId>,
+    current_count_down: Option<JoinHandle<()>>,
 }
 
 impl RoomServer {
@@ -206,6 +208,7 @@ impl RoomServer {
             current_player_idx: 0,
             turn_order: HashMap::with_capacity(6),
             crabul_player: None,
+            current_count_down: None,
         };
 
         (room_server, RoomCommander::new(tx_channel))
@@ -226,6 +229,7 @@ impl RoomServer {
             current_player_idx: 0,
             turn_order: HashMap::with_capacity(6),
             crabul_player: None,
+            current_count_down: None,
         };
 
         spawn(room_server.run());
@@ -392,6 +396,10 @@ impl RoomServer {
             return Err(GameError::NameAlreadyExists);
         }
 
+        if name.len() == 0 {
+            return Err(GameError::EmptyName);
+        }
+
         let (tx_channel, rx_channel) = mpsc::unbounded_channel();
         let player_id = thread_rng().gen::<PlayerId>();
 
@@ -458,6 +466,9 @@ impl RoomServer {
     }
 
     fn next_turn(&mut self) {
+        if let Some(current_count_down) = self.current_count_down.take() {
+            current_count_down.abort();
+        }
         self.same_card_thrown = false;
         self.current_player_idx += 1;
         self.current_player_idx %= self.players.len();
@@ -475,10 +486,12 @@ impl RoomServer {
         let event = RoomEvent::PlayerTurn(current_player_id);
         self.send_all_players(event);
 
-        spawn(Self::turn_countdown(
+        let count_down = spawn(Self::turn_countdown(
             current_player_id,
             self.tx_channel.clone(),
         ));
+
+        self.current_count_down = Some(count_down);
     }
 
     fn finalize_game(&mut self) {
@@ -549,9 +562,16 @@ impl RoomServer {
             self.send_all_players(event);
 
             if let Some(power) = self.match_power(card) {
+                if self.crabul_player.is_some() && self.players.len() == 2 {
+                    let event = RoomEvent::PowerDiscarded(player_id, power);
+                    self.send_all_players(event);
+                    self.next_turn();
+                    return Ok(());
+                }
                 let event = RoomEvent::PowerActivated(player_id, power);
                 self.send_all_players(event);
                 self.state = State::PowerStage(player_id, power);
+                return Ok(());
             }
 
             self.next_turn();
@@ -878,12 +898,18 @@ impl RoomServer {
             }
             Power::BlindSwap => {
                 let rng = &mut rand::thread_rng();
-                let (other_player_id, other_player) = self
-                    .players
-                    .iter()
-                    .filter(|(id, _)| **id != player_id)
-                    .choose(rng)
-                    .unwrap();
+                let player_list = self.players.iter().filter(|(id, _)| {
+                    **id != player_id
+                        && (self.crabul_player.is_none() || **id != self.crabul_player.unwrap())
+                });
+
+                if player_list.clone().count()==0 {
+                    let event = RoomEvent::PowerDiscarded(player_id, power);
+                    self.send_all_players(event);
+                    return;
+                }
+
+                let (other_player_id, other_player) = player_list.choose(rng).unwrap();
                 let card_idx = rng.gen_range(0..self.players[&player_id].cards.len());
                 let other_card_idx = rng.gen_range(0..other_player.cards.len());
 
@@ -2114,6 +2140,7 @@ mod tests {
             same_card_thrown: false,
             current_player_idx,
             crabul_player: None,
+            current_count_down: None,
             turn_order: HashMap::from([(0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5)]),
         };
 
