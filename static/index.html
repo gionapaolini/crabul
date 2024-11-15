@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+    <meta charset="utf-8" />
+    <title>Crabul!</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link rel="stylesheet" href="index.css">
+
+</head>
+
+<body>
+    <div id="notification-container"></div>
+
+    <div id="drawn-card-modal" class="custom-modal">
+        <div class="custom-modal-content">
+            <img id="drawn-card" src="cards/0_1.svg" alt="Card" class="img-fluid mb-3">
+            <div class="d-flex justify-content-around">
+                <button id="discard-card-btn" class="btn btn-danger">Discard</button>
+                <button id="swap-card-btn" class="btn btn-success">Swap</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="lobby">
+        <div class="d-flex flex-column align-items-center vh-100 bg-dark text-white">
+            <div class="mb-4">
+                <picture>
+                    <source srcset="crabul_logo.png" media="(prefers-color-scheme: dark)" />
+                    <img id="logo-img" src="crabul_logo.png" alt="Crabul Logo" class="img-fluid"
+                        style="width: 400px; height: 400px;" />
+                </picture>
+            </div>
+
+            <div class="bg-secondary p-5 rounded shadow-lg text-center" style="width: 100%; max-width: 400px;">
+                <form class="mb-3">
+                    <div class="mb-3">
+                        <input type="text" id="name" class="form-control" placeholder="Enter your name" />
+                    </div>
+
+                    <div class="d-grid mb-3">
+                        <button disabled id="new-room-button" type="button" class="btn btn-primary btn-lg">
+                            Create New Room
+                        </button>
+                    </div>
+                    or
+                    <div class="input-group mt-3">
+                        <input id="room-code-input" type="text" class="form-control" placeholder="Enter room code" />
+                        <button disabled id="join-room-button" type="button" class="btn btn-primary">
+                            Join Room
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="waiting-room" style="display: none;">
+        <div class="d-flex flex-column align-items-center vh-100 bg-dark text-white">
+            <div class="mb-4">
+                <picture>
+                    <source srcset="crabul_logo.png" media="(prefers-color-scheme: dark)" />
+                    <img src="crabul_logo.png" alt="Crabul Logo" class="img-fluid"
+                        style="width: 150px; height: 150px;" />
+                </picture>
+            </div>
+
+            <div class="bg-secondary p-4 rounded shadow-lg text-center mb-4" style="width: 100%; max-width: 400px;">
+                <h5 class="mb-1" style="font-size: 1rem;">"Room Code"</h5>
+
+                <div id="room-code-plh" class="p-2" style="font-size: 2rem; font-weight: bold;">
+                    <!-- {room_id} -->
+                </div>
+            </div>
+
+            <div class="bg-secondary p-4 rounded shadow-lg text-center" style="width: 100%; max-width: 400px;">
+                <h4 class="mb-3">"Players"</h4>
+
+                <div id="players-container" class="d-flex flex-column">
+                </div>
+
+                <div class="d-grid mt-3">
+                    <button id="start-game-button" type="button" class="btn btn-primary btn-lg">
+                        Waiting for more players...
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="game-room" style="display: none;">
+        <div class="d-flex flex-column align-items-center vh-100 bg-dark text-black">
+            <div class="">
+                <picture>
+                    <source srcset="crabul_logo.png" media="(prefers-color-scheme: dark)" />
+                    <img src="crabul_logo.png" alt="Crabul Logo" class="img-fluid"
+                        style="width: 150px; height: 150px;" />
+                </picture>
+            </div>
+            <div class="container-lg d-flex">
+                <!-- Left side with stacked player items -->
+                <div id="player-card-container" class="col-6 d-flex flex-column gap-3 p-3 overflow-auto">
+                </div>
+                <div class="col-6 d-flex flex-column justify-content-center align-items-center">
+                    <div class="d-flex gap-4 align-items-center">
+                        <!-- Deck image -->
+                        <img id="discard-pile" src="cards/empty.svg" alt="Discard Pile" class="discard-img" style="width: 120px;">
+
+                        <img src="cards/deck.svg" alt="Deck" class="img-fluid ms-3" style="width: 150px;">
+
+                        <!-- Discard pile image -->
+                    </div>
+                </div>
+            </div>
+            <div class="container mt-4">
+                <div class="row">
+                    <!-- Buttons Section (Inline) -->
+                    <div class="col-12 d-flex justify-content-center gap-3 mb-4">
+                        <button disabled id="draw-card-btn" class="btn btn-primary">Draw Card</button>
+                        <button disabled id="crabul-btn" class="btn btn-primary">Go Crabul</button>
+                    </div>
+
+                    <!-- Main Player Card Section -->
+                    <div class="col">
+                        <div class="p-3 rounded">
+                            <div class="fw-bold text-center">Your cards</div>
+                            <div id="main-player-card-container" class="d-flex justify-content-center gap-2 mt-2">
+                                <!-- Player cards will appear here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const waitingRoom = document.getElementById("waiting-room");
+        const lobby = document.getElementById("lobby");
+        const gameRoom = document.getElementById("game-room");
+        const nameInput = document.getElementById('name');
+        const romeCodeInput = document.getElementById('room-code-input');
+        const newRoomButton = document.getElementById('new-room-button');
+        const joinRoomButton = document.getElementById('join-room-button');
+        const playersContainer = document.getElementById("players-container");
+        const startGameButton = document.getElementById("start-game-button");
+        const playerCardContainer = document.getElementById("player-card-container");
+        const mainPlayerCardContainer = document.getElementById("main-player-card-container");
+        const drawButton = document.getElementById("draw-card-btn");
+        const crabulButton = document.getElementById("crabul-btn");
+        const discardButton = document.getElementById("discard-card-btn");
+        const swapButton = document.getElementById("swap-card-btn");
+        const drawnCard = document.getElementById("drawn-card");
+        const drawnCardModal = document.getElementById("drawn-card-modal");
+        const discardPile = document.getElementById("discard-pile"); 
+
+        var playersLoaded = false;
+        var userPlayerId;
+        var players = {};
+        
+
+        nameInput.addEventListener('input', () => {
+            if (nameInput.value.trim() === '') {
+                newRoomButton.disabled = true;  // Disable button if input is empty
+                joinRoomButton.disabled = true;  // Disable button if input is empty
+            } else {
+                newRoomButton.disabled = false;  // Disable button if input is empty
+                joinRoomButton.disabled = false;  // Disable button if input is empty
+            }
+        });
+
+        newRoomButton.addEventListener('click', () => {
+            connect_ws("connect")
+        })
+
+        joinRoomButton.addEventListener('click', () => {
+            connect_ws(`connect/${romeCodeInput.value}`)
+        })
+
+        startGameButton.addEventListener('click', () => {
+            socket.send("/start");
+        })
+
+        drawButton.addEventListener('click', () => {
+            socket.send("/draw");
+        })
+
+        discardButton.addEventListener('click', () => {
+            socket.send("/discard");
+            drawnCardModal.style.display = 'none';
+        })
+        swapButton.addEventListener('click', () => {
+            drawnCardModal.style.display = 'none';
+        })
+
+        function connect_ws(endpoint) {
+            const { location } = window
+            const proto = location.protocol.startsWith('https') ? 'wss' : 'ws'
+            const wsUri = `${proto}://${location.host}/${endpoint}?name=${nameInput.value}`
+
+            socket = new WebSocket(wsUri)
+
+            socket.onopen = () => {
+                lobby.remove();
+                waitingRoom.style.display = "block";
+
+            }
+
+            socket.onmessage = ev => {
+                const msg = JSON.parse(ev.data);
+                console.log(msg)
+                handleMessage(msg)
+            }
+
+            socket.onclose = () => {
+                socket = null
+            }
+        }
+
+        function handleMessage(data) {
+            if ("PlayerJoined" in data) {
+                const roomCode = data["PlayerJoined"]["room_id"];
+                const playerId = data["PlayerJoined"]["player_id"];
+                const playerName = data["PlayerJoined"]["player_name"];
+                const playerList = data["PlayerJoined"]["player_list"];
+                const roomCodeElement = document.getElementById("room-code-plh");
+                roomCodeElement.innerHTML = roomCode;
+
+                if (playersLoaded) {
+                    addPlayer(playerId, playerName);
+                } else {
+                    for (let playerID in playerList) {
+                        // Access the key and the value                   
+                        addPlayer(playerID, playerList[playerID]);
+                    }
+                    delete players[playerId];
+                    userPlayerId = playerId;
+                    playersLoaded = true;
+                    updateStartButtonText();
+                }
+            }
+            if ("PlayerLeft" in data) {
+                const playerId = data["PlayerLeft"];
+                removePlayer(playerId);
+            }
+            if ("PeekingPhaseStarted" in data) {
+                startGame(data["PeekingPhaseStarted"]);
+            }
+            if ("PlayerTurn" in data) {
+                if (data["PlayerTurn"] === userPlayerId) {
+                    createNotification(`Your turn`);
+                    drawButton.disabled = false;
+                    crabulButton.disabled = false;
+                } else {
+                    createNotification(`Player turn: ${players[data["PlayerTurn"]]}`);
+                }
+                coverCards();
+                highlightCurrentPlayer(data["PlayerTurn"]);
+            }
+            if ("CardWasDrawn" in data) {
+                if (data["CardWasDrawn"] != userPlayerId) {
+                    createNotification(`Player ${players[data["CardWasDrawn"]]} drew a card from the deck`);
+                }
+            }
+            if ("DrawnCard" in data) {
+                drawnCard.src = getCardImage(data["DrawnCard"]);
+                drawnCardModal.style.display = 'flex';
+            }
+            if ("CardDiscarded" in data) {
+                if (data["CardDiscarded"][0] != userPlayerId) {
+                    createNotification(`Player ${players[data["CardDiscarded"][0]]} discarded a card`);
+                }
+                discardPile.src = getCardImage(data["CardDiscarded"][1]);
+            }
+            if ("PowerActivated" in data) {
+                if (data["PowerActivated"][0] != userPlayerId) {
+                    createNotification(`Player ${players[data["PowerActivated"][0]]} activated a power: ${data["PowerActivated"][1]}`);
+                }
+                
+            }
+        }
+
+        function addPlayer(playerId, playerName) {
+            players[playerId] = playerName;
+
+            const newPlayerDivWaitingRoom = `
+                    <div id="player-${playerId}-card" class="card mb-3" style="width: 100%;">
+                        <div class="card-body">
+                        <h5 class="card-title">${playerName}</h5>
+                        </div>
+                    </div>
+            `
+            playersContainer.insertAdjacentHTML("beforeend", newPlayerDivWaitingRoom);
+
+            updateStartButtonText();
+        }
+
+        function removePlayer(playerId) {
+            delete players[playerId];
+
+            const playerCard = document.getElementById(`player-${playerId}-card`);
+
+            playerCard.remove();
+            updateStartButtonText();
+        }
+
+        function updateStartButtonText() {
+
+            if (Object.keys(players).length >= 1) {
+                startGameButton.innerText = "Start Game"
+            } else {
+                startGameButton.innerText = "Waiting for more players..."
+            }
+        }
+
+        function startGame(cards) {
+            createNotification('Game has started');
+            waitingRoom.remove();
+            for (let key in players) {
+                const newPlayerCards = `
+                <div id="cards-container-player-${key}" class="bg-secondary text-black p-3 rounded">
+                    <div class="fw-bold">${players[key]}</div>
+                    <div class="d-flex gap-1 mt-2">
+                        <img src="cards/retro.svg" alt="Card" class="img-fluid hover-zoom" style="width: 60px;">
+                        <img src="cards/retro.svg" alt="Card" class="img-fluid hover-zoom" style="width: 60px;">
+                        <img src="cards/retro.svg" alt="Card" class="img-fluid hover-zoom" style="width: 60px;">
+                        <img src="cards/retro.svg" alt="Card" class="img-fluid hover-zoom" style="width: 60px;">
+                    </div>
+                </div>`;
+                playerCardContainer.insertAdjacentHTML("beforeend", newPlayerCards);
+            }
+
+            for (let i in [...Array(4).keys()]) {
+                const playerCard = `
+                    <img id="main-card-${i}" src="cards/retro.svg" alt="Card" class="img-fluid hover-zoom" style="width: 70px;">    
+                `;
+                mainPlayerCardContainer.insertAdjacentHTML("beforeend", playerCard);
+            }
+
+            document.getElementById("main-card-0").src = getCardImage(cards[0]);
+            document.getElementById("main-card-1").src = getCardImage(cards[1]);
+
+            gameRoom.style.display = "block";
+        }
+
+        function coverCards() {
+            const cards = document.querySelectorAll('[id^="main-card-"]');
+            // Change the src of each matched element (assuming they're images)
+            cards.forEach(card => {
+                card.src = "cards/retro.svg";
+            });
+        }
+
+        function getCardImage(card) {
+            if (card === "Joker") {
+                return "cards/joker.svg";
+            }
+            if ("Clubs" in card) {
+                return `cards/0_${card["Clubs"]}.svg`;
+            }
+            if ("Diamonds" in card) {
+                return `cards/1_${card["Diamonds"]}.svg`;
+            }
+            if ("Hearts" in card) {
+                return `cards/2_${card["Hearts"]}.svg`;
+            }
+            if ("Spade" in card) {
+                return `cards/3_${card["Spade"]}.svg`;
+            }
+            alert(`Card not recognized: ${JSON.stringify(card)}`)
+        }
+
+        function highlightCurrentPlayer(id) {
+            let playerDiv;
+            console.log("Current player turn is " + id + " player id is: " + userPlayerId);
+            if (id === userPlayerId) {
+                playerDiv = mainPlayerCardContainer;
+            } else {
+                playerDiv = document.getElementById(`cards-container-player-${id}`);
+
+            }
+            playerDiv.classList.add("highlight-shadow");
+        }
+
+        function createNotification(message) {
+            const container = document.getElementById("notification-container");
+
+            // Create a new notification div
+            const notification = document.createElement("div");
+            notification.className = "notification";
+            notification.textContent = message;
+
+            // Append the notification to the container
+            container.appendChild(notification);
+
+            // Automatically remove the notification after 30 seconds
+            setTimeout(() => {
+                notification.remove();
+            }, 5000); // 30 seconds
+        }
+
+
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.8/dist/umd/popper.min.js"
+        integrity="sha384-I7E8VVD/ismYTF4hNIPjVp/Zjvgyol6VFvRkX/vR+Vc4jQkC+hVqc2pM8ODewa9r"
+        crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.min.js"
+        integrity="sha384-0pUGZvbkm6XF6gxjEnlmuGrJXVbNuzT9qBBavbLwCsOGabYfZo0T0to5eqruptLy"
+        crossorigin="anonymous"></script>
+</body>
+
+</html>

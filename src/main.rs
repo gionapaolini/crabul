@@ -1,4 +1,10 @@
-use actix_web::{get, rt, web, App, Error, HttpRequest, HttpResponse, HttpServer};
+
+use actix_files as fs;
+use actix_web::{
+    get, rt,
+    web::{self},
+    App, Error, HttpRequest, HttpResponse, HttpServer, Responder,
+};
 use crabul::{
     consts::{PlayerName, RoomId},
     server::{Server, ServerCommander},
@@ -73,6 +79,11 @@ async fn join_room(
     Ok(res)
 }
 
+// async fn index() -> impl Responder {
+//     NamedFile::open_async("./index.html").await.unwrap()
+// }
+ 
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let (game_server, server_commander) = Server::new();
@@ -84,6 +95,8 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(server_commander.clone()))
             .service(new_room)
             .service(join_room)
+            .service(fs::Files::new("/", "static").index_file("index.html"))
+
     })
     .bind(("127.0.0.1", 8080))?
     .run()
