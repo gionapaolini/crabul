@@ -95,7 +95,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(server_commander.clone()))
             .service(new_room)
             .service(join_room)
-            .service(fs::Files::new("/", "static").index_file("index.html"))
+            .service(fs::Files::new("/", "./static").index_file("index.html"))
 
     })
     .bind(("0.0.0.0", 8080))?
