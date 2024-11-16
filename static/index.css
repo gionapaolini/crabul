@@ -127,3 +127,16 @@
   max-width: 400px;
   width: 90%;
 }
+
+.crabul-badge {
+  position: absolute;
+  top: -40px;
+  right: -50px;
+  width: 180px; /* Adjust size as needed */
+  height: auto;
+  z-index: 10;
+}
+
+.larger {
+  max-width: 900px;
+}

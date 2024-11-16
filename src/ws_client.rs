@@ -269,6 +269,7 @@ impl WsClient {
         command
             .split(" ")
             .skip(1)
+            .filter(|split| !split.is_empty())
             .map(|val| val.parse::<usize>())
             .collect()
     }

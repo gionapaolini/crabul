@@ -748,9 +748,10 @@ impl RoomServer {
                     );
                     return Ok(());
                 }
+                let chosen_card = self.players[&picked_player_id].cards[picked_card_idx];
                 if let Some(discarded_card) = self.deck.get_last_discarded() {
                     self.validate_idx_card(picked_player_id, picked_card_idx)?;
-                    let chosen_card = self.players[&picked_player_id].cards[picked_card_idx];
+                    
                     if chosen_card.get_value() == discarded_card.get_value() {
                         let card = self
                             .players
@@ -785,6 +786,14 @@ impl RoomServer {
                             SameCardResult::NotTheSame,
                         );
                     }
+                }else {
+                    self.give_penalty(
+                        player_id,
+                        picked_player_id,
+                        picked_card_idx,
+                        Some(chosen_card),
+                        SameCardResult::NotTheSame,
+                    );
                 }
 
                 Ok(())

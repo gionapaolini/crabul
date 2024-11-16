@@ -61,7 +61,9 @@ impl Deck {
 
     pub fn draw(&mut self) -> Card {
         if self.cards.is_empty() {
+            let last_discarded = self.discard_pile.pop().unwrap();
             mem::swap(&mut self.cards, &mut self.discard_pile);
+            self.discard_pile.push(last_discarded);
         }
         self.cards.pop().unwrap()
     }
