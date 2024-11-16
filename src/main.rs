@@ -3,7 +3,7 @@ use actix_files as fs;
 use actix_web::{
     get, rt,
     web::{self},
-    App, Error, HttpRequest, HttpResponse, HttpServer, Responder,
+    App, Error, HttpRequest, HttpResponse, HttpServer,
 };
 use crabul::{
     consts::{PlayerName, RoomId},
