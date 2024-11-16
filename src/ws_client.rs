@@ -45,7 +45,10 @@ impl WsClient {
                         .text(serde_json::to_string(&room_event).unwrap())
                         .await
                         .unwrap();
-                }
+                },
+                Either::Left((None, _)) => {
+                    break;
+                },
                 Either::Right((Some(Ok(msg)), _)) => match msg {
                     AggregatedMessage::Text(msg) => {
                         let msg: &str = &msg;
