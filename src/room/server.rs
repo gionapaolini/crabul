@@ -10,10 +10,16 @@ use tokio::{
 };
 
 use crate::{
+    consts::{PlayerId, PlayerName, RoomId},
+    deck::{Card, Deck},
+    room::{commander::RoomCommander, commands::RoomCommand, events::RoomEvent},
+};
+
+use super::{
     consts::{
-        GameError, PlayerId, PlayerName, RoomId, FINALIZE_GAME_COUNTDOWN, MAX_PLAYERS, MIN_PLAYERS,
-        PEEKING_PHASE_COUNTDOWN, TURN_COUNTDOWN,
-    }, deck::{Card, Deck}, room::{commander::RoomCommander, commands::RoomCommand, events::RoomEvent}
+        FINALIZE_GAME_COUNTDOWN, MAX_PLAYERS, MIN_PLAYERS, PEEKING_PHASE_COUNTDOWN, TURN_COUNTDOWN,
+    },
+    errors::GameError,
 };
 
 #[derive(Serialize, Copy, Clone, PartialEq)]
@@ -282,7 +288,7 @@ impl RoomServer {
             return Err(GameError::NameAlreadyExists);
         }
 
-        if name.len() == 0 {
+        if name.is_empty() {
             return Err(GameError::EmptyName);
         }
 
@@ -937,7 +943,7 @@ mod tests {
 
     use tokio::time::pause;
 
-    use crate::{consts::TURN_COUNTDOWN, deck};
+    use crate::deck;
 
     use super::*;
 

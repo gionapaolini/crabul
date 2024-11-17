@@ -3,9 +3,11 @@ use tokio::sync::{
     oneshot,
 };
 
-use crate::consts::{GameError, PlayerId, PlayerName};
-use crate::room::events::RoomEvent;
+use crate::consts::{PlayerId, PlayerName};
 use crate::room::commands::RoomCommand;
+use crate::room::events::RoomEvent;
+
+use super::errors::GameError;
 
 #[derive(Clone)]
 pub struct RoomCommander {

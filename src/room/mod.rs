@@ -1,4 +1,6 @@
-pub mod commands;
-pub mod events;
 pub mod commander;
-pub mod room;
+pub mod commands;
+pub mod consts;
+pub mod errors;
+pub mod events;
+pub mod server;

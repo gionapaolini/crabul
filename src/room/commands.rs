@@ -1,6 +1,7 @@
 use tokio::sync::{mpsc::UnboundedReceiver, oneshot};
 
-use crate::consts::{GameError, PlayerId, PlayerName};
+use crate::consts::{PlayerId, PlayerName};
+use crate::room::errors::GameError;
 
 use super::events::RoomEvent;
 

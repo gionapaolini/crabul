@@ -81,7 +81,6 @@ async fn join_room(
 // async fn index() -> impl Responder {
 //     NamedFile::open_async("./index.html").await.unwrap()
 // }
- 
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -95,7 +94,6 @@ async fn main() -> std::io::Result<()> {
             .service(new_room)
             .service(join_room)
             .service(fs::Files::new("/", "./static").index_file("index.html"))
-
     })
     .bind(("0.0.0.0", 8080))?
     .run()

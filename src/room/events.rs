@@ -2,10 +2,12 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 
-use crate::{consts::{PlayerId, PlayerName, RoomId}, deck::Card};
+use crate::{
+    consts::{PlayerId, PlayerName, RoomId},
+    deck::Card,
+};
 
-use super::room::{FinalScore, Power, SameCardResult};
-
+use super::server::{FinalScore, Power, SameCardResult};
 
 #[derive(Serialize, Clone)]
 pub enum RoomEvent {

@@ -4,10 +4,9 @@ use actix_ws::{AggregatedMessage, AggregatedMessageStream, Session};
 use futures_util::future::{select, Either};
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use crate::{
-    consts::{GameError, PlayerId}, room::commander::RoomCommander,
-};
+use crate::room::errors::GameError;
 use crate::room::events::RoomEvent;
+use crate::{consts::PlayerId, room::commander::RoomCommander};
 
 pub struct WsClient {
     player_id: PlayerId,
@@ -44,10 +43,7 @@ impl WsClient {
                         .text(serde_json::to_string(&room_event).unwrap())
                         .await
                         .unwrap();
-                },
-                Either::Left((None, _)) => {
-                    break;
-                },
+                }
                 Either::Right((Some(Ok(msg)), _)) => match msg {
                     AggregatedMessage::Text(msg) => {
                         let msg: &str = &msg;
@@ -140,6 +136,7 @@ impl WsClient {
                     _ => {}
                 },
                 _ => {
+                    // todo: Should log what happened
                     break;
                 }
             }
