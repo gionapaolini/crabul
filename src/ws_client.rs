@@ -6,9 +6,9 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::{
     consts::{GameError, PlayerId},
-    room::RoomEvent,
     room_commander::RoomCommander,
 };
+use crate::room::events::RoomEvent;
 
 pub struct WsClient {
     player_id: PlayerId,

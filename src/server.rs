@@ -9,7 +9,9 @@ use tokio::{
     },
 };
 
-use crate::{consts::RoomId, room::RoomServer, room_commander::RoomCommander};
+use crate::consts::RoomId;
+use crate::room_old::RoomServer;
+use crate::room_commander::RoomCommander;
 
 #[derive(Serialize)]
 pub enum ServerError {
@@ -125,7 +127,7 @@ impl Server {
 mod tests {
     use tokio::spawn;
 
-    use crate::room::RoomEvent;
+    use crate::room::events::RoomEvent;
 
     use super::*;
 

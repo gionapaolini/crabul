@@ -4,10 +4,7 @@ use rand::{seq::IteratorRandom, thread_rng, Rng};
 use serde::Serialize;
 use tokio::{
     spawn,
-    sync::{
-        mpsc::{self, UnboundedReceiver, UnboundedSender},
-        oneshot,
-    },
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
     time::sleep,
 };
@@ -16,89 +13,8 @@ use crate::{
     consts::{
         GameError, PlayerId, PlayerName, RoomId, FINALIZE_GAME_COUNTDOWN, MAX_PLAYERS, MIN_PLAYERS,
         PEEKING_PHASE_COUNTDOWN, TURN_COUNTDOWN,
-    },
-    deck::{Card, Deck},
-    room_commander::RoomCommander,
+    }, deck::{Card, Deck}, room::{commands::RoomCommand, events::RoomEvent}, room_commander::RoomCommander
 };
-
-pub enum RoomCommand {
-    AddPlayer {
-        name: PlayerName,
-        cmd_tx: oneshot::Sender<Result<(PlayerId, UnboundedReceiver<RoomEvent>), GameError>>,
-    },
-    RemovePlayer {
-        player_id: PlayerId,
-        cmd_tx: oneshot::Sender<()>,
-    },
-    StartGame {
-        cmd_tx: oneshot::Sender<Result<(), GameError>>,
-    },
-    SetPlayerReady {
-        player_id: PlayerId,
-        cmd_tx: oneshot::Sender<Result<(), GameError>>,
-    },
-    NextTurn,
-    GoCrabul {
-        player_id: PlayerId,
-        cmd_tx: oneshot::Sender<Result<(), GameError>>,
-    },
-    DrawCard {
-        player_id: PlayerId,
-        cmd_tx: oneshot::Sender<Result<(), GameError>>,
-    },
-    SwapCard {
-        player_id: PlayerId,
-        card_idx: usize,
-        cmd_tx: oneshot::Sender<Result<(), GameError>>,
-    },
-    DiscardCard {
-        player_id: PlayerId,
-        cmd_tx: oneshot::Sender<Result<(), GameError>>,
-    },
-    PeekOwnCard {
-        player_id: PlayerId,
-        card_idx: usize,
-        cmd_tx: oneshot::Sender<Result<(), GameError>>,
-    },
-    PeekOtherCard {
-        player_id: PlayerId,
-        other_player_id: PlayerId,
-        other_card_idx: usize,
-        cmd_tx: oneshot::Sender<Result<(), GameError>>,
-    },
-    BlindSwap {
-        player_id: PlayerId,
-        card_idx: usize,
-        other_player_id: PlayerId,
-        other_card_idx: usize,
-        cmd_tx: oneshot::Sender<Result<(), GameError>>,
-    },
-    CheckAndSwapStage1 {
-        player_id: PlayerId,
-        other_player_id: PlayerId,
-        other_card_idx: usize,
-        cmd_tx: oneshot::Sender<Result<(), GameError>>,
-    },
-    CheckAndSwapStage2 {
-        player_id: PlayerId,
-        card_idx: Option<usize>,
-        cmd_tx: oneshot::Sender<Result<(), GameError>>,
-    },
-    ThrowSameCard {
-        player_id: PlayerId,
-        picked_player_id: PlayerId,
-        picked_card_idx: usize,
-        cmd_tx: oneshot::Sender<Result<(), GameError>>,
-    },
-    SelectCardToGiveAway {
-        player_id: PlayerId,
-        card_idx: usize,
-        cmd_tx: oneshot::Sender<Result<(), GameError>>,
-    },
-    StopRoomServer,
-    ForceEndTurn(PlayerId),
-    FinalizeGame,
-}
 
 #[derive(Serialize, Copy, Clone, PartialEq)]
 pub enum Power {
@@ -126,41 +42,6 @@ pub struct Score {
 pub struct FinalScore {
     pub winner: PlayerId,
     pub scores: Vec<Score>,
-}
-
-#[derive(Serialize, Clone)]
-pub enum RoomEvent {
-    PlayerJoined {
-        room_id: RoomId,
-        player_id: PlayerId,
-        player_name: PlayerName,
-        player_list: HashMap<PlayerId, PlayerName>,
-    },
-    PlayerLeft(PlayerId),
-    GameStarted,
-    PlayerTurn(PlayerId),
-    PeekingPhaseStarted((Card, Card)),
-    PlayerIsReady(PlayerId),
-    CardWasDrawn(PlayerId),
-    DrawnCard(Card),
-    CardSwapped(PlayerId, usize),
-    CardDiscarded(PlayerId, Card),
-    PowerActivated(PlayerId, Power),
-    PeekedCard(Card),
-    PowerUsed(
-        Power,
-        PlayerId,
-        Option<usize>,
-        Option<PlayerId>,
-        Option<usize>,
-    ),
-    SameCardAttempt(PlayerId, PlayerId, usize, Option<Card>, SameCardResult),
-    CardReplaced(PlayerId, usize, PlayerId, usize),
-    PlayerWentCrabul(PlayerId),
-    GameTerminated(FinalScore),
-    TurnEndedByTimeout(PlayerId),
-    PowerDiscarded(PlayerId, Power),
-    ForcedBlindSwap(PlayerId, usize, PlayerId, usize),
 }
 
 pub struct Player {
