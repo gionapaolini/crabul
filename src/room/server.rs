@@ -32,7 +32,7 @@ pub enum Power {
 }
 
 #[derive(Deserialize, Serialize, Clone)]
-pub enum SameCardResult {
+pub enum DuplicateCardResult {
     Success,
     NotTheSame,
     TooLate,
@@ -64,7 +64,7 @@ pub enum State {
     StartTurn(PlayerId),
     MiddleTurn(PlayerId, Card),
     PowerStage(PlayerId, Power),
-    PauseForSameCardThrow(PlayerId, PlayerId, usize, Box<State>),
+    PauseForDuplicateCardThrow(PlayerId, PlayerId, usize, Box<State>),
     Terminating,
     Terminated,
 }
@@ -75,7 +75,7 @@ pub struct RoomServer {
     players: HashMap<PlayerId, Player>,
     deck: Deck,
     state: State,
-    same_card_thrown: bool,
+    duplicate_card_thrown: bool,
     current_player_idx: usize,
     turn_order: HashMap<usize, PlayerId>,
     crabul_player: Option<PlayerId>,
@@ -93,7 +93,7 @@ impl RoomServer {
             players: HashMap::with_capacity(6),
             deck: Deck::new(),
             state: State::NotStarted,
-            same_card_thrown: false,
+            duplicate_card_thrown: false,
             current_player_idx: 0,
             turn_order: HashMap::with_capacity(6),
             crabul_player: None,
@@ -102,7 +102,6 @@ impl RoomServer {
 
         (room_server, RoomCommander::new(tx_channel))
     }
-
 
     pub fn get_id(&self) -> RoomId {
         self.id
@@ -203,7 +202,8 @@ impl RoomServer {
                     picked_card_idx,
                     cmd_tx,
                 } => {
-                    let res = self.throw_same_card(player_id, picked_player_id, picked_card_idx);
+                    let res =
+                        self.throw_duplicate_card(player_id, picked_player_id, picked_card_idx);
                     let _ = cmd_tx.send(res);
                 }
                 RoomCommand::SelectCardToGiveAway {
@@ -349,7 +349,7 @@ impl RoomServer {
         if let Some(current_count_down) = self.current_count_down.take() {
             current_count_down.abort();
         }
-        self.same_card_thrown = false;
+        self.duplicate_card_thrown = false;
         self.current_player_idx += 1;
         self.current_player_idx %= self.players.len();
         let current_player_id = self.turn_order[&self.current_player_idx];
@@ -605,7 +605,7 @@ impl RoomServer {
         Err(GameError::OperationNotAllowedAtCurrentState)
     }
 
-    fn throw_same_card(
+    fn throw_duplicate_card(
         &mut self,
         player_id: PlayerId,
         picked_player_id: PlayerId,
@@ -618,15 +618,15 @@ impl RoomServer {
             State::StartTurn(_)
             | State::MiddleTurn(_, _)
             | State::PowerStage(_, _)
-            | State::PauseForSameCardThrow(_, _, _, _)
+            | State::PauseForDuplicateCardThrow(_, _, _, _)
             | State::Terminating => {
-                if self.same_card_thrown {
+                if self.duplicate_card_thrown {
                     self.give_penalty(
                         player_id,
                         picked_player_id,
                         picked_card_idx,
                         None,
-                        SameCardResult::TooLate,
+                        DuplicateCardResult::TooLate,
                     );
                     return Ok(());
                 }
@@ -635,37 +635,14 @@ impl RoomServer {
                     self.validate_idx_card(picked_player_id, picked_card_idx)?;
 
                     if chosen_card.get_value() == discarded_card.get_value() {
-                        let card = self
-                            .players
-                            .get_mut(&picked_player_id)
-                            .unwrap()
-                            .cards
-                            .remove(picked_card_idx);
-                        self.deck.discard(card);
-                        let event = RoomEvent::SameCardAttempt(
-                            player_id,
-                            picked_player_id,
-                            picked_card_idx,
-                            Some(card),
-                            SameCardResult::Success,
-                        );
-                        self.send_all_players(event);
-                        self.same_card_thrown = true;
-                        if player_id != picked_player_id {
-                            self.state = State::PauseForSameCardThrow(
-                                player_id,
-                                picked_player_id,
-                                picked_card_idx,
-                                Box::new(self.state.clone()),
-                            )
-                        }
+                        self.handle_success_duplicate(picked_player_id, picked_card_idx, player_id);
                     } else {
                         self.give_penalty(
                             player_id,
                             picked_player_id,
                             picked_card_idx,
                             Some(chosen_card),
-                            SameCardResult::NotTheSame,
+                            DuplicateCardResult::NotTheSame,
                         );
                     }
                 } else {
@@ -674,7 +651,7 @@ impl RoomServer {
                         picked_player_id,
                         picked_card_idx,
                         Some(chosen_card),
-                        SameCardResult::NotTheSame,
+                        DuplicateCardResult::NotTheSame,
                     );
                 }
 
@@ -683,12 +660,44 @@ impl RoomServer {
         }
     }
 
+    fn handle_success_duplicate(
+        &mut self,
+        picked_player_id: u16,
+        picked_card_idx: usize,
+        player_id: u16,
+    ) {
+        let card = self
+            .players
+            .get_mut(&picked_player_id)
+            .unwrap()
+            .cards
+            .remove(picked_card_idx);
+        self.deck.discard(card);
+        let event = RoomEvent::DuplicateCardAttempt(
+            player_id,
+            picked_player_id,
+            picked_card_idx,
+            Some(card),
+            DuplicateCardResult::Success,
+        );
+        self.send_all_players(event);
+        self.duplicate_card_thrown = true;
+        if player_id != picked_player_id {
+            self.state = State::PauseForDuplicateCardThrow(
+                player_id,
+                picked_player_id,
+                picked_card_idx,
+                Box::new(self.state.clone()),
+            )
+        }
+    }
+
     fn select_card_to_give_away(
         &mut self,
         player_id: PlayerId,
         card_idx: usize,
     ) -> Result<(), GameError> {
-        if let State::PauseForSameCardThrow(
+        if let State::PauseForDuplicateCardThrow(
             stored_player_id,
             other_player_id,
             other_card_idx,
@@ -728,9 +737,9 @@ impl RoomServer {
         picked_player_id: u16,
         picked_card_idx: usize,
         chosen_card: Option<Card>,
-        result: SameCardResult,
+        result: DuplicateCardResult,
     ) {
-        let event = RoomEvent::SameCardAttempt(
+        let event = RoomEvent::DuplicateCardAttempt(
             player_id,
             picked_player_id,
             picked_card_idx,
@@ -771,7 +780,7 @@ impl RoomServer {
                 self.discard_power(player_id, power);
                 self.next_turn();
             }
-            State::PauseForSameCardThrow(_, _, _, _) => {
+            State::PauseForDuplicateCardThrow(_, _, _, _) => {
                 //reset timer;
                 spawn(Self::turn_countdown(player_id, self.tx_channel.clone()));
             }
@@ -1038,7 +1047,8 @@ mod tests {
     #[tokio::test]
     async fn start_game() {
         let (room_server, mut room_commander) = RoomServer::new();
-        spawn(room_server.run());        let mut players = create_n_players(&mut room_commander, 6, true).await;
+        spawn(room_server.run());
+        let mut players = create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
 
         for (_, player_rx) in players.iter_mut() {
@@ -1053,7 +1063,8 @@ mod tests {
     #[tokio::test]
     async fn cannot_start_game_if_state_different_from_not_started() {
         let (room_server, mut room_commander) = RoomServer::new();
-        spawn(room_server.run());        create_n_players(&mut room_commander, 6, true).await;
+        spawn(room_server.run());
+        create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
         assert!(matches!(
             room_commander.start_game().await,
@@ -1064,7 +1075,8 @@ mod tests {
     #[tokio::test]
     async fn new_player_should_fail_when_game_started() {
         let (room_server, mut room_commander) = RoomServer::new();
-        spawn(room_server.run());        create_n_players(&mut room_commander, 6, true).await;
+        spawn(room_server.run());
+        create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
 
         assert!(matches!(
@@ -1076,7 +1088,8 @@ mod tests {
     #[tokio::test]
     async fn start_turn_when_everyone_is_ready() {
         let (room_server, mut room_commander) = RoomServer::new();
-        spawn(room_server.run());        let mut players = create_n_players(&mut room_commander, 6, true).await;
+        spawn(room_server.run());
+        let mut players = create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
 
         clean_events(&mut players).await;
@@ -1097,7 +1110,8 @@ mod tests {
     async fn cannot_set_ready_when_stage_is_not_peeking_phase() {
         pause();
         let (room_server, mut room_commander) = RoomServer::new();
-        spawn(room_server.run());        let mut players = create_n_players(&mut room_commander, 6, true).await;
+        spawn(room_server.run());
+        let mut players = create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
 
         clean_events(&mut players).await;
@@ -1115,7 +1129,8 @@ mod tests {
     async fn automatic_start_turn_after_timeout() {
         pause();
         let (room_server, mut room_commander) = RoomServer::new();
-        spawn(room_server.run());        let mut players = create_n_players(&mut room_commander, 6, true).await;
+        spawn(room_server.run());
+        let mut players = create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
 
         clean_events(&mut players).await;
@@ -1132,7 +1147,8 @@ mod tests {
     async fn draw_card() {
         pause();
         let (room_server, mut room_commander) = RoomServer::new();
-        spawn(room_server.run());        let mut players = create_n_players(&mut room_commander, 6, true).await;
+        spawn(room_server.run());
+        let mut players = create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
 
         clean_events(&mut players).await;
@@ -1158,7 +1174,8 @@ mod tests {
     async fn swap_card() {
         pause();
         let (room_server, mut room_commander) = RoomServer::new();
-        spawn(room_server.run());        let mut players = create_n_players(&mut room_commander, 6, true).await;
+        spawn(room_server.run());
+        let mut players = create_n_players(&mut room_commander, 6, true).await;
         room_commander.start_game().await.unwrap();
 
         let peeked_cards: Vec<(Card, Card)> = players
@@ -1526,18 +1543,18 @@ mod tests {
             .cards
             .push(Card::Diamonds(1));
 
-        server.throw_same_card(1, 1, 0).unwrap();
+        server.throw_duplicate_card(1, 1, 0).unwrap();
 
         for player_rx in players_rxs.iter_mut() {
             let received_event = get_nth_event(player_rx, 1).await;
             assert!(matches!(
                 received_event,
-                RoomEvent::SameCardAttempt(
+                RoomEvent::DuplicateCardAttempt(
                     1,
                     1,
                     0,
                     Some(Card::Diamonds(1)),
-                    SameCardResult::Success
+                    DuplicateCardResult::Success
                 )
             ));
         }
@@ -1563,18 +1580,18 @@ mod tests {
             .cards
             .extend_from_slice(&[Card::Hearts(2), Card::Hearts(3)]);
 
-        server.throw_same_card(1, 0, 0).unwrap();
+        server.throw_duplicate_card(1, 0, 0).unwrap();
 
         for player_rx in players_rxs.iter_mut() {
             let received_event = get_nth_event(player_rx, 1).await;
             assert!(matches!(
                 received_event,
-                RoomEvent::SameCardAttempt(
+                RoomEvent::DuplicateCardAttempt(
                     1,
                     0,
                     0,
                     Some(Card::Diamonds(1)),
-                    SameCardResult::Success
+                    DuplicateCardResult::Success
                 )
             ));
         }
@@ -1582,7 +1599,7 @@ mod tests {
         assert!(server.players.get(&0).unwrap().cards.is_empty());
         assert!(matches!(
             server.state.clone(),
-            State::PauseForSameCardThrow(1, 0, 0, state) if *state == State::StartTurn(0)));
+            State::PauseForDuplicateCardThrow(1, 0, 0, state) if *state == State::StartTurn(0)));
 
         server.select_card_to_give_away(1, 0).unwrap();
 
@@ -1623,7 +1640,13 @@ mod tests {
             let received_event = get_nth_event(player_rx, 1).await;
             assert!(matches!(
                 received_event,
-                RoomEvent::SameCardAttempt(5,0,0,Some(card),SameCardResult::NotTheSame) if card==cards_1[0]
+                RoomEvent::DuplicateCardAttempt(
+                5,
+                     0,
+                     0,
+                     Some(card),
+                     DuplicateCardResult::NotTheSame
+                 ) if card==cards_1[0]
             ));
         }
 
@@ -1652,17 +1675,17 @@ mod tests {
             .cards
             .push(Card::Diamonds(1));
 
-        server.throw_same_card(1, 1, 0).unwrap();
+        server.throw_duplicate_card(1, 1, 0).unwrap();
         players_rxs
             .iter_mut()
             .for_each(|rx| while rx.try_recv().is_ok() {});
-        server.throw_same_card(0, 1, 0).unwrap();
+        server.throw_duplicate_card(0, 1, 0).unwrap();
 
         for player_rx in players_rxs.iter_mut() {
             let received_event = get_nth_event(player_rx, 1).await;
             assert!(matches!(
                 received_event,
-                RoomEvent::SameCardAttempt(0, 1, 0, None, SameCardResult::TooLate)
+                RoomEvent::DuplicateCardAttempt(0, 1, 0, None, DuplicateCardResult::TooLate)
             ));
         }
 
@@ -2047,7 +2070,7 @@ mod tests {
             players,
             deck,
             state,
-            same_card_thrown: false,
+            duplicate_card_thrown: false,
             current_player_idx,
             crabul_player: None,
             current_count_down: None,

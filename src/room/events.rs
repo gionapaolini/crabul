@@ -7,7 +7,7 @@ use crate::{
     deck::Card,
 };
 
-use super::server::{FinalScore, Power, SameCardResult};
+use super::server::{DuplicateCardResult, FinalScore, Power};
 
 #[derive(Deserialize, Serialize, Clone)]
 pub enum RoomEvent {
@@ -35,7 +35,7 @@ pub enum RoomEvent {
         Option<PlayerId>,
         Option<usize>,
     ),
-    SameCardAttempt(PlayerId, PlayerId, usize, Option<Card>, SameCardResult),
+    DuplicateCardAttempt(PlayerId, PlayerId, usize, Option<Card>, DuplicateCardResult),
     CardReplaced(PlayerId, usize, PlayerId, usize),
     PlayerWentCrabul(PlayerId),
     GameTerminated(FinalScore),
