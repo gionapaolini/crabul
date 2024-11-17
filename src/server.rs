@@ -9,9 +9,7 @@ use tokio::{
     },
 };
 
-use crate::consts::RoomId;
-use crate::room_old::RoomServer;
-use crate::room_commander::RoomCommander;
+use crate::{consts::RoomId, room::{commander::RoomCommander, room::RoomServer}};
 
 #[derive(Serialize)]
 pub enum ServerError {

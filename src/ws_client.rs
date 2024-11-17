@@ -5,8 +5,7 @@ use futures_util::future::{select, Either};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::{
-    consts::{GameError, PlayerId},
-    room_commander::RoomCommander,
+    consts::{GameError, PlayerId}, room::commander::RoomCommander,
 };
 use crate::room::events::RoomEvent;
 

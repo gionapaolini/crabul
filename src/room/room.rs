@@ -13,7 +13,7 @@ use crate::{
     consts::{
         GameError, PlayerId, PlayerName, RoomId, FINALIZE_GAME_COUNTDOWN, MAX_PLAYERS, MIN_PLAYERS,
         PEEKING_PHASE_COUNTDOWN, TURN_COUNTDOWN,
-    }, deck::{Card, Deck}, room::{commands::RoomCommand, events::RoomEvent}, room_commander::RoomCommander
+    }, deck::{Card, Deck}, room::{commander::RoomCommander, commands::RoomCommand, events::RoomEvent}
 };
 
 #[derive(Serialize, Copy, Clone, PartialEq)]
@@ -937,7 +937,7 @@ mod tests {
 
     use tokio::time::pause;
 
-    use crate::{consts::TURN_COUNTDOWN, deck, room_commander::RoomCommander};
+    use crate::{consts::TURN_COUNTDOWN, deck};
 
     use super::*;
 
