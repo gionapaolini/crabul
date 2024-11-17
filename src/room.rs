@@ -14,8 +14,8 @@ use tokio::{
 
 use crate::{
     consts::{
-        GameError, PlayerId, PlayerName, RoomId, MAX_PLAYERS, MIN_PLAYERS, PEEKING_PHASE_COUNTDOWN,
-        TURN_COUNTDOWN,
+        GameError, PlayerId, PlayerName, RoomId, FINALIZE_GAME_COUNTDOWN, MAX_PLAYERS, MIN_PLAYERS,
+        PEEKING_PHASE_COUNTDOWN, TURN_COUNTDOWN,
     },
     deck::{Card, Deck},
     room_commander::RoomCommander,
@@ -97,6 +97,7 @@ pub enum RoomCommand {
     },
     StopRoomServer,
     ForceEndTurn(PlayerId),
+    FinalizeGame,
 }
 
 #[derive(Serialize, Copy, Clone, PartialEq)]
@@ -177,6 +178,7 @@ pub enum State {
     MiddleTurn(PlayerId, Card),
     PowerStage(PlayerId, Power),
     PauseForSameCardThrow(PlayerId, PlayerId, usize, Box<State>),
+    Terminating,
     Terminated,
 }
 pub struct RoomServer {
@@ -343,6 +345,9 @@ impl RoomServer {
                 RoomCommand::ForceEndTurn(player_id) => {
                     self.force_end_turn(player_id);
                 }
+                RoomCommand::FinalizeGame => {
+                    self.finalize_game();
+                }
             }
         }
     }
@@ -476,7 +481,8 @@ impl RoomServer {
 
         if let Some(crabul_player) = self.crabul_player {
             if current_player_id == crabul_player {
-                self.finalize_game();
+                spawn(Self::finalize_game_countdown(self.tx_channel.clone()));
+                self.state = State::Terminating;
                 return;
             }
         }
@@ -737,7 +743,8 @@ impl RoomServer {
             State::StartTurn(_)
             | State::MiddleTurn(_, _)
             | State::PowerStage(_, _)
-            | State::PauseForSameCardThrow(_, _, _, _) => {
+            | State::PauseForSameCardThrow(_, _, _, _)
+            | State::Terminating => {
                 if self.same_card_thrown {
                     self.give_penalty(
                         player_id,
@@ -751,7 +758,7 @@ impl RoomServer {
                 let chosen_card = self.players[&picked_player_id].cards[picked_card_idx];
                 if let Some(discarded_card) = self.deck.get_last_discarded() {
                     self.validate_idx_card(picked_player_id, picked_card_idx)?;
-                    
+
                     if chosen_card.get_value() == discarded_card.get_value() {
                         let card = self
                             .players
@@ -786,7 +793,7 @@ impl RoomServer {
                             SameCardResult::NotTheSame,
                         );
                     }
-                }else {
+                } else {
                     self.give_penalty(
                         player_id,
                         picked_player_id,
@@ -869,7 +876,7 @@ impl RoomServer {
             return;
         }
         match self.state {
-            State::NotStarted | State::PeekingPhase | State::Terminated => {}
+            State::NotStarted | State::PeekingPhase | State::Terminating | State::Terminated => {}
             State::StartTurn(_) => {
                 let event = RoomEvent::TurnEndedByTimeout(player_id);
                 self.send_all_players(event);
@@ -912,7 +919,7 @@ impl RoomServer {
                         && (self.crabul_player.is_none() || **id != self.crabul_player.unwrap())
                 });
 
-                if player_list.clone().count()==0 {
+                if player_list.clone().count() == 0 {
                     let event = RoomEvent::PowerDiscarded(player_id, power);
                     self.send_all_players(event);
                     return;
@@ -1035,6 +1042,11 @@ impl RoomServer {
     async fn turn_countdown(player_id: PlayerId, tx_channel: UnboundedSender<RoomCommand>) {
         sleep(TURN_COUNTDOWN).await;
         let _ = tx_channel.send(RoomCommand::ForceEndTurn(player_id));
+    }
+
+    async fn finalize_game_countdown(tx_channel: UnboundedSender<RoomCommand>) {
+        sleep(FINALIZE_GAME_COUNTDOWN).await;
+        let _ = tx_channel.send(RoomCommand::FinalizeGame);
     }
 }
 
@@ -1847,7 +1859,8 @@ mod tests {
 
     #[tokio::test]
     async fn end_game_when_turn_reaches_crabul_player() {
-        let (mut server, _, mut players_rxs) = get_basic_server();
+        pause();
+        let (mut server, room_commander, mut players_rxs) = get_basic_server();
 
         for (_, player) in server.players.iter_mut() {
             player
@@ -1872,7 +1885,11 @@ mod tests {
             .iter_mut()
             .for_each(|rx| while rx.try_recv().is_ok() {});
 
-        server.swap_card(5, 0).unwrap();
+        spawn(server.run());
+
+        room_commander.swap_card(5, 0).await.unwrap();
+
+        sleep(FINALIZE_GAME_COUNTDOWN.add(Duration::from_secs(1))).await;
 
         for player_rx in players_rxs.iter_mut() {
             let received_event = get_nth_event(player_rx, 1).await;
@@ -1896,6 +1913,7 @@ mod tests {
 
     #[tokio::test]
     async fn room_terminate_when_game_is_over() {
+        pause();
         let (mut server, commander, mut players_rxs) = get_basic_server();
 
         for (_, player) in server.players.iter_mut() {
@@ -1923,6 +1941,8 @@ mod tests {
 
         spawn(server.run());
         commander.swap_card(5, 0).await.unwrap();
+
+        sleep(FINALIZE_GAME_COUNTDOWN.add(Duration::from_secs(1))).await;
 
         for player_rx in players_rxs.iter_mut() {
             let received_event = get_nth_event(player_rx, 1).await;
