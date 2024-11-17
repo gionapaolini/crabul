@@ -91,7 +91,9 @@ impl Server {
         Ok(())
     }
     fn new_room(&mut self) -> RoomCommander {
-        let (room_id, room_commander) = RoomServer::start();
+        let (room_server, room_commander) = RoomServer::new();
+        let room_id = room_server.get_id();
+        spawn(room_server.run());
         self.rooms.insert(room_id, room_commander.clone());
         spawn(Self::remove_room(
             self.tx_channel.clone(),
