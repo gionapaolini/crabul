@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     consts::{PlayerId, PlayerName, RoomId},
@@ -9,7 +9,7 @@ use crate::{
 
 use super::server::{FinalScore, Power, SameCardResult};
 
-#[derive(Serialize, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 pub enum RoomEvent {
     PlayerJoined {
         room_id: RoomId,

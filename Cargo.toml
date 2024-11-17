@@ -3,6 +3,13 @@ name = "crabul"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+path = "src/main.rs"
+name = "crabul"
+
 [dependencies]
 actix-files = "0.6.6"
 actix-web = "4.9.0"
@@ -12,3 +19,6 @@ rand = "0.8.5"
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.132"
 tokio = { version = "1.41.1", features = ["macros", "rt-multi-thread", "sync", "test-util"] }
+
+[dev-dependencies]
+tokio-tungstenite = "0.24.0"

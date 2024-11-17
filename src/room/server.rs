@@ -1,7 +1,7 @@
 use std::{collections::HashMap, mem};
 
 use rand::{seq::IteratorRandom, thread_rng, Rng};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::{
     spawn,
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -22,7 +22,7 @@ use super::{
     errors::GameError,
 };
 
-#[derive(Serialize, Copy, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Copy, Clone, PartialEq)]
 pub enum Power {
     PeekOwnCard,
     PeekOtherCard,
@@ -31,20 +31,20 @@ pub enum Power {
     CheckAndSwapStage2(PlayerId, usize),
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 pub enum SameCardResult {
     Success,
     NotTheSame,
     TooLate,
 }
 
-#[derive(Serialize, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Clone, PartialEq)]
 pub struct Score {
     player_id: PlayerId,
     cards: Vec<Card>,
     total_score: i8,
 }
-#[derive(Serialize, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct FinalScore {
     pub winner: PlayerId,
     pub scores: Vec<Score>,

@@ -1,9 +1,9 @@
 use std::mem;
 
 use rand::{seq::SliceRandom, thread_rng};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Copy, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Copy, Clone, PartialEq)]
 pub enum Card {
     Clubs(u8),
     Diamonds(u8),
