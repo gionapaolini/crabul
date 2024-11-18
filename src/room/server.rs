@@ -108,7 +108,7 @@ impl RoomServer {
     }
 
     pub async fn run(mut self) {
-        while let Some(_) = self.process_next_command().await {}
+        while self.process_next_command().await.is_some() {}
     }
 
     async fn process_next_command(&mut self) -> Option<()> {
