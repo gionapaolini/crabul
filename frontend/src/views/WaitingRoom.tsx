@@ -1,17 +1,23 @@
 import { AnimatedList } from "@/components/ui/animated-list";
 import ShineBorder from "@/components/ui/shine-border";
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router";
 
 const WaitingRoom = () => {
-  const [players, setPlayers] = useState<string[]>([]);
-  const [isGameReady, setGameReady] = useState(false);
+  const navigate = useNavigate();
+
+  const myPlayerId = "0";
+
+  const [players, setPlayers] = useState<
+    { name: string; id: string; isReady: boolean }[]
+  >([{ name: "Giangi", id: "0", isReady: false }]);
+
   const [countdown, setCountdown] = useState<number | null>(null);
 
   useEffect(() => {
-    console.log("countdown", countdown);
     if (countdown !== null) {
       const timer = setTimeout(() => {
-        if (countdown > 1) {
+        if (countdown > 0) {
           setCountdown(countdown - 1);
         } else {
           setCountdown(null);
@@ -21,20 +27,59 @@ const WaitingRoom = () => {
     }
   }, [countdown]);
 
+  // Aggiunge giocatori fittizi per simulare l'arrivo di altri giocatori
   useEffect(() => {
     const timeout1 = setTimeout(() => {
-      setPlayers((prev) => [...prev, "Giona"]);
+      setPlayers((prev) => [
+        ...prev,
+        { name: "Giona", id: "1", isReady: false },
+      ]);
     }, 2000);
 
+    const timeout1_2 = setTimeout(() => {
+      setPlayerReady("1"); // Giona
+    }, 7200);
+
     const timeout2 = setTimeout(() => {
-      setPlayers((prev) => [...prev, "Mario"]);
+      setPlayers((prev) => [
+        ...prev,
+        { name: "Mario", id: "2", isReady: false },
+      ]);
     }, 3200);
+
+    const timeout2_2 = setTimeout(() => {
+      setPlayerReady("2");
+    }, 6200);
 
     return () => {
       clearTimeout(timeout1);
       clearTimeout(timeout2);
+      clearTimeout(timeout1_2);
+      clearTimeout(timeout2_2);
     };
   }, []);
+
+  // Se tutti i giocatori sono pronti, inizia il countdown
+  useEffect(() => {
+    if (players.length > 0) {
+      const allPlayersReady = players.every((player) => player.isReady);
+      if (allPlayersReady) {
+        countdown == null && setCountdown(3);
+        countdown == 0 && navigate("/");
+      } else {
+        setCountdown(null);
+      }
+    }
+    // Tiene traccia del countdown. Se entrano altri giocatori mentre il countdown è in corso, lo interrompe
+  }, [players, countdown]);
+
+  const setPlayerReady = (id: string) => {
+    setPlayers((prev) =>
+      prev.map((player) =>
+        player.id === id ? { ...player, isReady: true } : player
+      )
+    );
+  };
 
   return (
     <>
@@ -54,7 +99,7 @@ const WaitingRoom = () => {
 
           <ShineBorder className="mt-[10vh] w-full max-w-[500px] mx-auto bg-transparent backdrop-blur-sm p-8">
             <section className="font-game text-3xl text-center">
-              {!isGameReady ? (
+              {!countdown ? (
                 <h2 className="flex items-center mb-4">
                   Waiting for players
                   <span className="loading-dots">
@@ -74,20 +119,20 @@ const WaitingRoom = () => {
               <AnimatedList className="flex-col-reverse">
                 <div className="font-game text-white text-4xl flex justify-between items-center">
                   <div className="flex items-center">
-                    Giangi
+                    {players.find((player) => player.id === myPlayerId)?.name}
                     <span className="text-black text-2xl">(you)</span>
                   </div>
 
                   <>
-                    {isGameReady ? (
+                    {players.find((player) => player.id === myPlayerId)
+                      ?.isReady ? (
                       <h3 className="w-fit text-green-400 p-2 font-game text-2xl">
                         Ready
                       </h3>
                     ) : (
                       <button
                         onClick={() => {
-                          setGameReady(true);
-                          setCountdown(3);
+                          setPlayerReady(myPlayerId);
                         }}
                         className="btn-game w-fit text-white rounded-lg p-2 font-game text-xl"
                       >
@@ -96,14 +141,22 @@ const WaitingRoom = () => {
                     )}
                   </>
                 </div>
-                {players.map((player, index) => (
-                  <React.Fragment key={index}>
-                    <div className="font-game text-white text-4xl flex justify-between items-center">
-                      <div className="flex items-center">{player}</div>
-                      <div></div>
-                    </div>
-                  </React.Fragment>
-                ))}
+                {players
+                  .filter((player) => player.id !== myPlayerId)
+                  .map((player, index) => (
+                    <React.Fragment key={index}>
+                      <div className="font-game text-white text-4xl flex justify-between items-center">
+                        <div className="flex items-center">{player.name}</div>
+                        <div>
+                          {player.isReady && (
+                            <h3 className="w-fit text-green-400 p-2 font-game text-2xl">
+                              Ready
+                            </h3>
+                          )}
+                        </div>
+                      </div>
+                    </React.Fragment>
+                  ))}
               </AnimatedList>
             </div>
           </ShineBorder>
