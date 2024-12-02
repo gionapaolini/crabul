@@ -1,9 +1,13 @@
 import { CoolMode } from "@/components/ui/cool-mode";
 import SparklesText from "@/components/ui/sparkles-text";
+import { useState } from "react";
 import { useNavigate } from "react-router";
 
 const StartGame = () => {
   let navigate = useNavigate();
+
+  const [playerName, setPlayerName] = useState<string | null>(null);
+  const [roomCode, setRoomCode] = useState<string | null>(null);
 
   return (
     <>
@@ -27,16 +31,20 @@ const StartGame = () => {
                 <input
                   type="text"
                   id="name"
+                  onChange={(e) => setPlayerName(e.target.value)}
                   placeholder="Enter your name"
                   className="p-4 bg-white bg-opacity-90 rounded-lg font-game mb-2"
                 />
                 <button
-                  disabled={false} // Change to true to disable the button
+                  disabled={playerName == ""}
                   id="new-room-button"
                   className="btn-game text-white rounded-lg p-2 mt-2 font-game text-3xl"
                   type="button"
                   onClick={() => {
-                    navigate("/waiting-room");
+                    // start connection to new room server
+                    navigate("/waiting-room", {
+                      state: { playerName: playerName },
+                    });
                   }}
                 >
                   <SparklesText
@@ -53,6 +61,7 @@ const StartGame = () => {
                   <input
                     id="room-code-input"
                     type="text"
+                    onChange={(e) => setRoomCode(e.target.value)}
                     className="p-4 bg-white bg-opacity-90 w-full rounded-l-lg font-game"
                     placeholder="Enter room code"
                   />
@@ -69,6 +78,13 @@ const StartGame = () => {
                       id="join-room-button"
                       type="button"
                       className="btn-game text-white rounded-r-lg p-2 min-w-fit font-game text-3xl"
+                      disabled={playerName == "" && roomCode == ""}
+                      onClick={() => {
+                        // start connection to existing room server
+                        navigate("/waiting-room", {
+                          state: { playerName, roomCode },
+                        });
+                      }}
                     >
                       <SparklesText
                         text="Join Room"

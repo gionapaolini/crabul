@@ -1,0 +1,70 @@
+import { createContext, useCallback, useContext, useState } from "react";
+
+const WebSocketContext = createContext<{
+  socket: any;
+  message: any;
+  isConnected: boolean;
+  connect: (endpoint: string) => void;
+} | null>(null);
+
+export const WebSocketProvider = ({
+  children,
+  initialName,
+}: {
+  children: any;
+  initialName: string;
+}) => {
+  const [socket, setSocket] = useState<any>(null);
+  const [message, setMessage] = useState<any>();
+  const [isConnected, setIsConnected] = useState<boolean>(false);
+
+  const connect = useCallback(
+    (endpoint: string) => {
+      const { location } = window;
+      const proto = location.protocol.startsWith("https") ? "wss" : "ws";
+      const host = "49.13.158.245:5000";
+      const wsUri = `${proto}://${host}/${endpoint}?name=${initialName}`;
+
+      const ws = new WebSocket(wsUri);
+
+      ws.onopen = () => {
+        setIsConnected(true);
+      };
+
+      ws.onmessage = (ev) => {
+        const msg = JSON.parse(ev.data);
+        setMessage(msg);
+      };
+
+      ws.onclose = () => {
+        setIsConnected(false);
+        setSocket(null);
+      };
+
+      setSocket(ws);
+    },
+    [initialName]
+  );
+
+  return (
+    <WebSocketContext.Provider
+      value={{
+        socket,
+        message,
+        isConnected,
+        connect,
+      }}
+    >
+      {children}
+    </WebSocketContext.Provider>
+  );
+};
+
+// Custom hook to use WebSocket context
+export const useWebSocket = () => {
+  const context = useContext(WebSocketContext);
+  if (!context) {
+    throw new Error("useWebSocket must be used within a WebSocketProvider");
+  }
+  return context;
+};

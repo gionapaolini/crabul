@@ -1,19 +1,66 @@
 import { AnimatedList } from "@/components/ui/animated-list";
 import ShineBorder from "@/components/ui/shine-border";
+import { useWebSocket } from "@/context/WebSocketContext";
+import { l } from "node_modules/react-router/dist/production/fog-of-war-BDQTYoRQ.d.mts";
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
+import { Location, useLocation, useNavigate } from "react-router";
 
 const WaitingRoom = () => {
   const navigate = useNavigate();
+  const location: Location & {
+    state: {
+      playerName: string;
+      roomCode?: string;
+    };
+  } = useLocation();
 
-  const myPlayerId = "0";
+  const { connect, message, isConnected } = useWebSocket();
 
   const [players, setPlayers] = useState<
     { name: string; id: string; isReady: boolean }[]
-  >([{ name: "Giangi", id: "0", isReady: false }]);
+  >([]);
 
+  useEffect(() => {
+    if (!location.state) {
+      navigate("/", { replace: true });
+    }
+
+    if (location.state?.playerName?.trim()) {
+      if (location.state?.roomCode?.trim()) {
+        // connect to existing room server
+        connect(`connect/${location.state.roomCode}`);
+        return;
+      }
+      // connect to new room server
+      connect("connect");
+    }
+  }, []);
+
+  // util - to move
+  const getMessage = (key: "PlayerJoined", message: any) => {
+    if (key in message) {
+      return message[key];
+    }
+  };
+
+  useEffect(() => {
+    if (message) {
+      const player = getMessage("PlayerJoined", message);
+
+      const { player_id, player_name } = player;
+      setPlayers((prev) => [
+        ...prev,
+        {
+          name: player_name,
+          id: player_id,
+          isReady: false,
+        },
+      ]);
+    }
+  }, [message]);
+
+  // for later, needs player ready state
   const [countdown, setCountdown] = useState<number | null>(null);
-
   useEffect(() => {
     if (countdown !== null) {
       const timer = setTimeout(() => {
@@ -27,45 +74,13 @@ const WaitingRoom = () => {
     }
   }, [countdown]);
 
-  // Aggiunge giocatori fittizi per simulare l'arrivo di altri giocatori
-  useEffect(() => {
-    const timeout1 = setTimeout(() => {
-      setPlayers((prev) => [
-        ...prev,
-        { name: "Giona", id: "1", isReady: false },
-      ]);
-    }, 2000);
-
-    const timeout1_2 = setTimeout(() => {
-      setPlayerReady("1"); // Giona
-    }, 7200);
-
-    const timeout2 = setTimeout(() => {
-      setPlayers((prev) => [
-        ...prev,
-        { name: "Mario", id: "2", isReady: false },
-      ]);
-    }, 3200);
-
-    const timeout2_2 = setTimeout(() => {
-      setPlayerReady("2");
-    }, 6200);
-
-    return () => {
-      clearTimeout(timeout1);
-      clearTimeout(timeout2);
-      clearTimeout(timeout1_2);
-      clearTimeout(timeout2_2);
-    };
-  }, []);
-
   // Se tutti i giocatori sono pronti, inizia il countdown
   useEffect(() => {
     if (players.length > 0) {
       const allPlayersReady = players.every((player) => player.isReady);
       if (allPlayersReady) {
         countdown == null && setCountdown(3);
-        countdown == 0 && navigate("/");
+        countdown == 0 && navigate("/"); // procede con il gioco
       } else {
         setCountdown(null);
       }
@@ -117,7 +132,7 @@ const WaitingRoom = () => {
 
             <div className="w-full max-w-[400px]">
               <AnimatedList className="flex-col-reverse">
-                <div className="font-game text-white text-4xl flex justify-between items-center">
+                {/* <div className="font-game text-white text-4xl flex justify-between items-center">
                   <div className="flex items-center">
                     {players.find((player) => player.id === myPlayerId)?.name}
                     <span className="text-black text-2xl">(you)</span>
@@ -140,9 +155,9 @@ const WaitingRoom = () => {
                       </button>
                     )}
                   </>
-                </div>
+                </div> */}
                 {players
-                  .filter((player) => player.id !== myPlayerId)
+                  // .filter((player) => player.id !== myPlayerId)
                   .map((player, index) => (
                     <React.Fragment key={index}>
                       <div className="font-game text-white text-4xl flex justify-between items-center">
