@@ -1,12 +1,14 @@
 import { AnimatedList } from "@/components/ui/animated-list";
 import ShineBorder from "@/components/ui/shine-border";
 import { useWebSocket } from "@/context/WebSocketContext";
-import { l } from "node_modules/react-router/dist/production/fog-of-war-BDQTYoRQ.d.mts";
+import { getSocketMessage } from "@/lib/websocket.utils";
+import { WebSocketDataType } from "@/models/WebSocketDataType";
 import React, { useEffect, useState } from "react";
 import { Location, useLocation, useNavigate } from "react-router";
 
 const WaitingRoom = () => {
   const navigate = useNavigate();
+
   const location: Location & {
     state: {
       playerName: string;
@@ -19,6 +21,8 @@ const WaitingRoom = () => {
   const [players, setPlayers] = useState<
     { name: string; id: string; isReady: boolean }[]
   >([]);
+  const [roomId, setRoomId] = useState<number | null>(null);
+  const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!location.state) {
@@ -36,30 +40,45 @@ const WaitingRoom = () => {
     }
   }, []);
 
-  // util - to move
-  const getMessage = (key: "PlayerJoined", message: any) => {
-    if (key in message) {
-      return message[key];
-    }
-  };
-
   useEffect(() => {
     if (message) {
-      const player = getMessage("PlayerJoined", message);
+      const playerAdded = getSocketMessage(
+        WebSocketDataType.PlayerJoined,
+        message
+      );
 
-      const { player_id, player_name } = player;
-      setPlayers((prev) => [
-        ...prev,
-        {
-          name: player_name,
-          id: player_id,
-          isReady: false,
-        },
-      ]);
+      const playerLeft: number = getSocketMessage(
+        WebSocketDataType.PlayerLeft,
+        message
+      );
+
+      if (playerAdded) {
+        const { player_id, player_name, room_id, player_list } = playerAdded;
+        setRoomId(room_id);
+        if (player_name === location.state.playerName) {
+          setMyPlayerId(player_id);
+        }
+
+        const playersArray = Object.entries<any>(player_list).map(
+          ([id, name]) => ({
+            id,
+            name,
+            isReady: false,
+          })
+        );
+
+        setPlayers(playersArray);
+      }
+
+      if (playerLeft) {
+        setPlayers((prev) =>
+          prev.filter((player) => +player.id !== +playerLeft)
+        );
+      }
     }
   }, [message]);
 
-  // for later, needs player ready state
+  // TODO: later, needs player ready state
   const [countdown, setCountdown] = useState<number | null>(null);
   useEffect(() => {
     if (countdown !== null) {
@@ -96,6 +115,8 @@ const WaitingRoom = () => {
     );
   };
 
+  // END later
+
   return (
     <>
       <main
@@ -103,7 +124,7 @@ const WaitingRoom = () => {
         style={{ backgroundImage: "url(sfondo-pattern.jpg)" }}
       >
         <div
-          className="min-h-screen flex flex-col bg-center md:!bg-contain bg-no-repeat"
+          className="min-h-screen flex flex-col bg-center items-center md:!bg-contain bg-no-repeat"
           style={{ backgroundImage: "url(sfondo.png)", backgroundSize: "150%" }}
         >
           <img
@@ -112,69 +133,80 @@ const WaitingRoom = () => {
             alt=""
           />
 
-          <ShineBorder className="mt-[10vh] w-full max-w-[500px] mx-auto bg-transparent backdrop-blur-sm p-8">
-            <section className="font-game text-3xl text-center">
-              {!countdown ? (
-                <h2 className="flex items-center mb-4">
-                  Waiting for players
-                  <span className="loading-dots">
-                    <span>.</span>
-                    <span>.</span>
-                    <span>.</span>
-                  </span>
-                </h2>
-              ) : (
-                <h2 className="flex items-center mb-4">
-                  All set! Get ready for the match...
-                </h2>
-              )}
-            </section>
+          <section>
+            {roomId && (
+              <div className="text-center text-white font-game text-4xl my-8">
+                <h2>Room</h2>
+                <span className="text-5xl">{roomId}</span>
+              </div>
+            )}
 
-            <div className="w-full max-w-[400px]">
-              <AnimatedList className="flex-col-reverse">
-                {/* <div className="font-game text-white text-4xl flex justify-between items-center">
-                  <div className="flex items-center">
-                    {players.find((player) => player.id === myPlayerId)?.name}
-                    <span className="text-black text-2xl">(you)</span>
-                  </div>
+            <ShineBorder className="w-full max-w-[500px] mx-auto bg-transparent backdrop-blur-sm p-8">
+              <section className="font-game text-3xl text-center">
+                {!countdown ? (
+                  <h2 className="flex items-center mb-4">
+                    Waiting for players
+                    <span className="loading-dots">
+                      <span>.</span>
+                      <span>.</span>
+                      <span>.</span>
+                    </span>
+                  </h2>
+                ) : (
+                  <h2 className="flex items-center mb-4">
+                    All set! Get ready for the match...
+                  </h2>
+                )}
+              </section>
 
-                  <>
-                    {players.find((player) => player.id === myPlayerId)
-                      ?.isReady ? (
-                      <h3 className="w-fit text-green-400 p-2 font-game text-2xl">
-                        Ready
-                      </h3>
-                    ) : (
-                      <button
-                        onClick={() => {
-                          setPlayerReady(myPlayerId);
-                        }}
-                        className="btn-game w-fit text-white rounded-lg p-2 font-game text-xl"
-                      >
-                        I'm Ready
-                      </button>
-                    )}
-                  </>
-                </div> */}
-                {players
-                  // .filter((player) => player.id !== myPlayerId)
-                  .map((player, index) => (
-                    <React.Fragment key={index}>
+              <div className="w-full max-w-[400px]">
+                <AnimatedList className="flex-col-reverse">
+                  {myPlayerId && (
+                    <>
                       <div className="font-game text-white text-4xl flex justify-between items-center">
-                        <div className="flex items-center">{player.name}</div>
-                        <div>
-                          {player.isReady && (
-                            <h3 className="w-fit text-green-400 p-2 font-game text-2xl">
-                              Ready
-                            </h3>
-                          )}
+                        <div className="flex items-center">
+                          {
+                            players.find((player) => +player.id == +myPlayerId)
+                              ?.name
+                          }
+                          <span className="text-black text-2xl">
+                            &nbsp;(you)
+                          </span>
                         </div>
                       </div>
-                    </React.Fragment>
-                  ))}
-              </AnimatedList>
-            </div>
-          </ShineBorder>
+
+                      {players
+                        .filter((player) => +player.id != +myPlayerId)
+                        .map((player, index) => (
+                          <React.Fragment key={index}>
+                            <div className="font-game text-white text-4xl flex justify-between items-center">
+                              <div className="flex items-center">
+                                {player.name}
+                              </div>
+
+                              <div>
+                                {player.isReady && (
+                                  <h3 className="w-fit text-green-400 p-2 font-game text-2xl">
+                                    Ready
+                                  </h3>
+                                )}
+                              </div>
+                            </div>
+                          </React.Fragment>
+                        ))}
+                    </>
+                  )}
+                </AnimatedList>
+              </div>
+            </ShineBorder>
+
+            <button
+              disabled={players.length <= 1}
+              className="disabled:opacity-50 btn-game text-4xl font-game text-white w-full p-4 mt-4"
+            >
+              Start Game
+            </button>
+          </section>
         </div>
       </main>
 

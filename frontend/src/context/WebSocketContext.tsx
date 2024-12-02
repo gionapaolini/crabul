@@ -1,4 +1,10 @@
-import { createContext, useCallback, useContext, useState } from "react";
+import {
+  createContext,
+  PropsWithChildren,
+  useCallback,
+  useContext,
+  useState,
+} from "react";
 
 const WebSocketContext = createContext<{
   socket: any;
@@ -10,8 +16,7 @@ const WebSocketContext = createContext<{
 export const WebSocketProvider = ({
   children,
   initialName,
-}: {
-  children: any;
+}: PropsWithChildren & {
   initialName: string;
 }) => {
   const [socket, setSocket] = useState<any>(null);
@@ -22,7 +27,7 @@ export const WebSocketProvider = ({
     (endpoint: string) => {
       const { location } = window;
       const proto = location.protocol.startsWith("https") ? "wss" : "ws";
-      const host = "49.13.158.245:5000";
+      const host = "49.13.158.245:5000"; // location.host;
       const wsUri = `${proto}://${host}/${endpoint}?name=${initialName}`;
 
       const ws = new WebSocket(wsUri);
