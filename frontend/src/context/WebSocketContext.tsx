@@ -6,7 +6,7 @@ import {
   useState,
 } from "react";
 
-const WebSocketContext = createContext<{
+export const WebSocketContext = createContext<{
   socket: any;
   message: any;
   isConnected: boolean;
@@ -63,13 +63,4 @@ export const WebSocketProvider = ({
       {children}
     </WebSocketContext.Provider>
   );
-};
-
-// Custom hook to use WebSocket context
-export const useWebSocket = () => {
-  const context = useContext(WebSocketContext);
-  if (!context) {
-    throw new Error("useWebSocket must be used within a WebSocketProvider");
-  }
-  return context;
 };

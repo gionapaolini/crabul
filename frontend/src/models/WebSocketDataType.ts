@@ -16,3 +16,11 @@ export enum WebSocketDataType {
   SameCardAttempt = "SameCardAttempt",
   CardReplaced = "CardReplaced",
 }
+
+// Types
+export interface PlayerJoinedRes {
+  player_id: number;
+  player_name: string;
+  room_id: number;
+  player_list: Record<string, string>;
+}

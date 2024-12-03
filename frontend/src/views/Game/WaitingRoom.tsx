@@ -1,10 +1,17 @@
 import { AnimatedList } from "@/components/ui/animated-list";
 import ShineBorder from "@/components/ui/shine-border";
-import { useWebSocket } from "@/context/WebSocketContext";
+import { useRoomState } from "@/hooks/useRoomState";
+import { useWebSocket } from "@/hooks/useWebSocket";
 import { getSocketMessage } from "@/lib/websocket.utils";
 import { WebSocketDataType } from "@/models/WebSocketDataType";
 import React, { useEffect, useState } from "react";
 import { Location, useLocation, useNavigate } from "react-router";
+
+export interface Player {
+  id: string;
+  name: string;
+  isReady: boolean;
+}
 
 const WaitingRoom = () => {
   const navigate = useNavigate();
@@ -16,70 +23,46 @@ const WaitingRoom = () => {
     };
   } = useLocation();
 
-  const { connect, message, isConnected } = useWebSocket();
+  const { connect, message } = useWebSocket();
 
-  const [players, setPlayers] = useState<
-    { name: string; id: string; isReady: boolean }[]
-  >([]);
-  const [roomId, setRoomId] = useState<number | null>(null);
-  const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
+  const { state, handlers } = useRoomState(location.state.playerName);
 
   useEffect(() => {
     if (!location.state) {
       navigate("/", { replace: true });
     }
 
-    if (location.state?.playerName?.trim()) {
-      if (location.state?.roomCode?.trim()) {
-        // connect to existing room server
-        connect(`connect/${location.state.roomCode}`);
-        return;
-      }
-      // connect to new room server
-      connect("connect");
+    if (location.state.playerName?.trim()) {
+      const endpoint = location.state.roomCode?.trim()
+        ? `connect/${location.state.roomCode}`
+        : "connect";
+
+      connect(endpoint);
     }
   }, []);
 
   useEffect(() => {
-    if (message) {
-      const playerAdded = getSocketMessage(
+    if (!message) return;
+
+    try {
+      const playerJoined = getSocketMessage(
         WebSocketDataType.PlayerJoined,
         message
       );
-
-      const playerLeft: number = getSocketMessage(
+      const playerLeft = getSocketMessage(
         WebSocketDataType.PlayerLeft,
         message
       );
 
-      if (playerAdded) {
-        const { player_id, player_name, room_id, player_list } = playerAdded;
-        setRoomId(room_id);
-        if (player_name === location.state.playerName) {
-          setMyPlayerId(player_id);
-        }
-
-        const playersArray = Object.entries<any>(player_list).map(
-          ([id, name]) => ({
-            id,
-            name,
-            isReady: false,
-          })
-        );
-
-        setPlayers(playersArray);
-      }
-
-      if (playerLeft) {
-        setPlayers((prev) =>
-          prev.filter((player) => +player.id !== +playerLeft)
-        );
-      }
+      if (playerJoined) handlers.handlePlayerJoined(playerJoined);
+      if (playerLeft) handlers.handlePlayerLeft(playerLeft);
+    } catch (error) {
+      console.error("Error processing websocket message:", error);
     }
   }, [message]);
 
-  // TODO: later, needs player ready state
   const [countdown, setCountdown] = useState<number | null>(null);
+
   useEffect(() => {
     if (countdown !== null) {
       const timer = setTimeout(() => {
@@ -93,27 +76,29 @@ const WaitingRoom = () => {
     }
   }, [countdown]);
 
-  // Se tutti i giocatori sono pronti, inizia il countdown
-  useEffect(() => {
-    if (players.length > 0) {
-      const allPlayersReady = players.every((player) => player.isReady);
-      if (allPlayersReady) {
-        countdown == null && setCountdown(3);
-        countdown == 0 && navigate("/"); // procede con il gioco
-      } else {
-        setCountdown(null);
-      }
-    }
-    // Tiene traccia del countdown. Se entrano altri giocatori mentre il countdown è in corso, lo interrompe
-  }, [players, countdown]);
+  // TODO: later, needs player ready state
 
-  const setPlayerReady = (id: string) => {
-    setPlayers((prev) =>
-      prev.map((player) =>
-        player.id === id ? { ...player, isReady: true } : player
-      )
-    );
-  };
+  // // Se tutti i giocatori sono pronti, inizia il countdown
+  // useEffect(() => {
+  //   if (state.players.length > 0) {
+  //     const allPlayersReady = state.players.every((player) => player.isReady);
+  //     if (allPlayersReady) {
+  //       countdown == null && setCountdown(3);
+  //       countdown == 0 && navigate("/"); // procede con il gioco
+  //     } else {
+  //       setCountdown(null);
+  //     }
+  //   }
+  //   // Tiene traccia del countdown. Se entrano altri giocatori mentre il countdown è in corso, lo interrompe
+  // }, [state.players, countdown]);
+
+  // const setPlayerReady = (id: string) => {
+  //   setPlayers((prev) =>
+  //     prev.map((player) =>
+  //       player.id === id ? { ...player, isReady: true } : player
+  //     )
+  //   );
+  // };
 
   // END later
 
@@ -134,10 +119,10 @@ const WaitingRoom = () => {
           />
 
           <section>
-            {roomId && (
+            {state.roomId && (
               <div className="text-center text-white font-game text-4xl my-8">
                 <h2>Room</h2>
-                <span className="text-5xl">{roomId}</span>
+                <span className="text-5xl">{state.roomId}</span>
               </div>
             )}
 
@@ -161,13 +146,14 @@ const WaitingRoom = () => {
 
               <div className="w-full max-w-[400px]">
                 <AnimatedList className="flex-col-reverse">
-                  {myPlayerId && (
+                  {state.myPlayerId && (
                     <>
                       <div className="font-game text-white text-4xl flex justify-between items-center">
                         <div className="flex items-center">
                           {
-                            players.find((player) => +player.id == +myPlayerId)
-                              ?.name
+                            state.players.find(
+                              (player) => +player.id == state.myPlayerId
+                            )?.name
                           }
                           <span className="text-black text-2xl">
                             &nbsp;(you)
@@ -175,8 +161,8 @@ const WaitingRoom = () => {
                         </div>
                       </div>
 
-                      {players
-                        .filter((player) => +player.id != +myPlayerId)
+                      {state.players
+                        .filter((player) => +player.id != state.myPlayerId)
                         .map((player, index) => (
                           <React.Fragment key={index}>
                             <div className="font-game text-white text-4xl flex justify-between items-center">
@@ -201,7 +187,8 @@ const WaitingRoom = () => {
             </ShineBorder>
 
             <button
-              disabled={players.length <= 1}
+              disabled={state.players.length <= 1}
+              onClick={() => setCountdown(3)}
               className="disabled:opacity-50 btn-game text-4xl font-game text-white w-full p-4 mt-4"
             >
               Start Game
