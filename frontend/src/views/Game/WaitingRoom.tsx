@@ -15,17 +15,15 @@ export interface Player {
 
 const WaitingRoom = () => {
   const navigate = useNavigate();
-
   const location: Location & {
     state: {
       playerName: string;
       roomCode?: string;
     };
   } = useLocation();
-
   const { connect, message } = useWebSocket();
-
-  const { state, handlers } = useRoomState(location.state.playerName);
+  const { state, handlers } = useRoomState();
+  const [countdown, setCountdown] = useState<number | null>(null);
 
   useEffect(() => {
     if (!location.state) {
@@ -54,14 +52,13 @@ const WaitingRoom = () => {
         message
       );
 
-      if (playerJoined) handlers.handlePlayerJoined(playerJoined);
+      if (playerJoined)
+        handlers.handlePlayerJoined(playerJoined, location.state.playerName);
       if (playerLeft) handlers.handlePlayerLeft(playerLeft);
     } catch (error) {
       console.error("Error processing websocket message:", error);
     }
   }, [message]);
-
-  const [countdown, setCountdown] = useState<number | null>(null);
 
   useEffect(() => {
     if (countdown !== null) {

@@ -8,7 +8,7 @@ interface RoomState {
   myPlayerId: number | null;
 }
 
-export const useRoomState = (playerName: string) => {
+export const useRoomState = () => {
   const [state, setState] = useState<RoomState>({
     players: [],
     roomId: null,
@@ -27,18 +27,18 @@ export const useRoomState = (playerName: string) => {
   }, []);
 
   const handlePlayerJoined = useCallback(
-    (payload: PlayerJoinedRes) => {
+    (payload: PlayerJoinedRes, myPlayerName: string) => {
       const { player_id, player_name, room_id, player_list } = payload;
 
       setState((prev) => ({
         ...prev,
         roomId: room_id,
-        myPlayerId: player_name === playerName ? player_id : prev.myPlayerId,
+        myPlayerId: player_name === myPlayerName ? player_id : prev.myPlayerId,
       }));
 
       updatePlayers(player_list);
     },
-    [playerName]
+    []
   );
 
   const handlePlayerLeft = useCallback((playerId: number) => {
