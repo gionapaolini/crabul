@@ -17,33 +17,30 @@ export const WebSocketProvider = ({
   const [message, setMessage] = useState<any>();
   const [isConnected, setIsConnected] = useState<boolean>(false);
 
-  const connect = useCallback(
-    (endpoint: string) => {
-      const { location } = window;
-      const proto = location.protocol.startsWith("https") ? "wss" : "ws";
-      const host = "49.13.158.245:5000"; // location.host;
-      const wsUri = `${proto}://${host}/${endpoint}?name=${initialName}`;
+  const connect = (endpoint: string) => {
+    const { location } = window;
+    const proto = location.protocol.startsWith("https") ? "wss" : "ws";
+    const host = "49.13.158.245:5000"; // location.host;
+    const wsUri = `${proto}://${host}/${endpoint}?name=${initialName}`;
 
-      const ws = new WebSocket(wsUri);
+    const ws = new WebSocket(wsUri);
 
-      ws.onopen = () => {
-        setIsConnected(true);
-      };
+    ws.onopen = () => {
+      setIsConnected(true);
+    };
 
-      ws.onmessage = (ev) => {
-        const msg = JSON.parse(ev.data);
-        setMessage(msg);
-      };
+    ws.onmessage = (ev) => {
+      const msg = JSON.parse(ev.data);
+      setMessage(msg);
+    };
 
-      ws.onclose = () => {
-        setIsConnected(false);
-        setSocket(null);
-      };
+    ws.onclose = () => {
+      setIsConnected(false);
+      setSocket(null);
+    };
 
-      setSocket(ws);
-    },
-    [initialName]
-  );
+    setSocket(ws);
+  };
 
   return (
     <WebSocketContext.Provider

@@ -5,7 +5,7 @@ import { getSocketMessage } from "@/lib/websocket.utils";
 import { WebSocketDataType } from "@/models/WebSocketDataType";
 import { useRoomStore } from "@/store/roomStore";
 import React, { useEffect, useState } from "react";
-import { Location, useLocation, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 
 export interface Player {
   id: string;
@@ -15,27 +15,17 @@ export interface Player {
 
 const WaitingRoom = () => {
   const navigate = useNavigate();
-
-  const location: Location & {
-    state: {
-      playerName: string;
-      roomCode?: string;
-    };
-  } = useLocation();
-  const { connect, message } = useWebSocket();
-
+  const { connect, message, socket } = useWebSocket();
   const state = useRoomStore();
 
   const [countdown, setCountdown] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!location.state) {
+    if (state.myPlayerName == "") {
       navigate("/", { replace: true });
-    }
-
-    if (location.state.playerName?.trim()) {
-      const endpoint = location.state.roomCode?.trim()
-        ? `connect/${location.state.roomCode}`
+    } else {
+      const endpoint = state.roomId?.trim()
+        ? `connect/${state.roomId}`
         : "connect";
 
       connect(endpoint);
@@ -56,7 +46,7 @@ const WaitingRoom = () => {
       );
 
       if (playerJoined)
-        state.handlePlayerJoined(playerJoined, location.state.playerName);
+        state.handlePlayerJoined(playerJoined, state.myPlayerName);
       if (playerLeft) state.handlePlayerLeft(playerLeft);
     } catch (error) {
       console.error("Error processing websocket message:", error);
@@ -105,98 +95,81 @@ const WaitingRoom = () => {
 
   return (
     <>
-      <main
-        className="min-h-screen flex flex-col bg-center bg-cover"
-        style={{ backgroundImage: "url(sfondo-pattern.jpg)" }}
-      >
-        <div
-          className="min-h-screen flex flex-col bg-center items-center md:!bg-contain bg-no-repeat"
-          style={{ backgroundImage: "url(sfondo.png)", backgroundSize: "150%" }}
-        >
-          <img
-            src="crabul_logo.png"
-            className="w-full max-w-48 mx-auto"
-            alt=""
-          />
+      <section>
+        {state.roomId && (
+          <div className="text-center text-white font-game text-4xl my-8">
+            <h2>Room</h2>
+            <span className="text-5xl">{state.roomId}</span>
+          </div>
+        )}
 
-          <section>
-            {state.roomId && (
-              <div className="text-center text-white font-game text-4xl my-8">
-                <h2>Room</h2>
-                <span className="text-5xl">{state.roomId}</span>
-              </div>
+        <ShineBorder className="w-full max-w-[500px] mx-auto bg-transparent backdrop-blur-sm p-8">
+          <section className="font-game text-3xl text-center">
+            {!countdown ? (
+              <h2 className="flex items-center mb-4">
+                Waiting for players
+                <span className="loading-dots">
+                  <span>.</span>
+                  <span>.</span>
+                  <span>.</span>
+                </span>
+              </h2>
+            ) : (
+              <h2 className="flex items-center mb-4">
+                All set! Get ready for the match...
+              </h2>
             )}
-
-            <ShineBorder className="w-full max-w-[500px] mx-auto bg-transparent backdrop-blur-sm p-8">
-              <section className="font-game text-3xl text-center">
-                {!countdown ? (
-                  <h2 className="flex items-center mb-4">
-                    Waiting for players
-                    <span className="loading-dots">
-                      <span>.</span>
-                      <span>.</span>
-                      <span>.</span>
-                    </span>
-                  </h2>
-                ) : (
-                  <h2 className="flex items-center mb-4">
-                    All set! Get ready for the match...
-                  </h2>
-                )}
-              </section>
-
-              <div className="w-full max-w-[400px]">
-                <AnimatedList className="flex-col-reverse">
-                  {state.myPlayerId && (
-                    <>
-                      <div className="font-game text-white text-4xl flex justify-between items-center">
-                        <div className="flex items-center">
-                          {
-                            state.players.find(
-                              (player) => player.id == state.myPlayerId
-                            )?.name
-                          }
-                          <span className="text-black text-2xl">
-                            &nbsp;(you)
-                          </span>
-                        </div>
-                      </div>
-
-                      {state.players
-                        .filter((player) => player.id != state.myPlayerId)
-                        .map((player, index) => (
-                          <React.Fragment key={index}>
-                            <div className="font-game text-white text-4xl flex justify-between items-center">
-                              <div className="flex items-center">
-                                {player.name}
-                              </div>
-
-                              <div>
-                                {player.isReady && (
-                                  <h3 className="w-fit text-green-400 p-2 font-game text-2xl">
-                                    Ready
-                                  </h3>
-                                )}
-                              </div>
-                            </div>
-                          </React.Fragment>
-                        ))}
-                    </>
-                  )}
-                </AnimatedList>
-              </div>
-            </ShineBorder>
-
-            <button
-              disabled={state.players.length <= 1}
-              onClick={() => setCountdown(3)}
-              className="disabled:opacity-50 btn-game text-4xl font-game text-white w-full p-4 mt-4"
-            >
-              Start Game
-            </button>
           </section>
-        </div>
-      </main>
+
+          <div className="w-full max-w-[400px]">
+            <AnimatedList className="flex-col-reverse">
+              {state.myPlayerId && (
+                <>
+                  <div className="font-game text-white text-4xl flex justify-between items-center">
+                    <div className="flex items-center">
+                      {
+                        state.players.find(
+                          (player) => player.id == state.myPlayerId
+                        )?.name
+                      }
+                      <span className="text-black text-2xl">&nbsp;(you)</span>
+                    </div>
+                  </div>
+
+                  {state.players
+                    .filter((player) => player.id != state.myPlayerId)
+                    .map((player, index) => (
+                      <React.Fragment key={index}>
+                        <div className="font-game text-white text-4xl flex justify-between items-center">
+                          <div className="flex items-center">{player.name}</div>
+
+                          <div>
+                            {player.isReady && (
+                              <h3 className="w-fit text-green-400 p-2 font-game text-2xl">
+                                Ready
+                              </h3>
+                            )}
+                          </div>
+                        </div>
+                      </React.Fragment>
+                    ))}
+                </>
+              )}
+            </AnimatedList>
+          </div>
+        </ShineBorder>
+
+        <button
+          disabled={state.players.length <= 1}
+          onClick={() => {
+            setCountdown(3);
+            socket.send("/start");
+          }}
+          className="disabled:opacity-50 btn-game text-4xl font-game text-white w-full p-4 mt-4"
+        >
+          Start Game
+        </button>
+      </section>
 
       {countdown !== null && (
         <div className="absolute bg-black inset-0 bg-opacity-20 font-game text-crab text-[10rem] flex justify-center items-center">

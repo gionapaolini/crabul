@@ -19,7 +19,6 @@ interface GameState {
     oldPowerState?: string
     oldPowerContainerText?: string
 }
-
 interface GameActions {
     handleWebSocketMessage: (data: any) => void;
     handlePickingPhase: (data: any) => void;
@@ -37,6 +36,7 @@ interface GameActions {
     handleCardReplaced: (data: any) => void;
     createNotification: (data: any) => void;
 }
+// TODO Add Socket store, handle also Room events
 
 export const useGameStore = create<GameState & GameActions>((set, get) => ({
     // Initial state
@@ -45,6 +45,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     cards: [],
     notifications: {},
     handleWebSocketMessage: (message: WebSocketMessage) => {
+        console.log(message);
         const messageHandlers: MessageHandlers = {
             [WebSocketDataType.PeekingPhaseStarted]: get().handlePickingPhase,
             [WebSocketDataType.PlayerTurn]: get().handlePlayerTurn,
@@ -64,14 +65,15 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         const handler = messageHandlers[messageType];
 
         if (handler) {
-            handler(message);
+            console.log(message);
+            handler(message[messageType]);
         } else {
             console.warn(`No handler found for message type: ${messageType}`);
         }
     },
     handlePickingPhase: (message: any) => {
-        const players = useRoomStore.getState().players;
         console.log("Picking phase started", message);
+        const players = useRoomStore.getState().players_list;
         startGame({ cards: message, players });
     },
     handlePlayerTurn: (message: any) => {
@@ -243,5 +245,8 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         set({ powerState: get().oldPowerState })
         powerContainer.innerText = get().oldPowerContainerText || "";
     },
-    createNotification: (message: string) => set({ notifications: message })
+    createNotification: (message: string) => {
+        console.log(message);
+        set({ notifications: message })
+    }
 }))

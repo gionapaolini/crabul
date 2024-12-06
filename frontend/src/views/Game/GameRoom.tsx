@@ -1,28 +1,46 @@
+import { toast } from "@/hooks/use-toast";
+import { useWebSocket } from "@/hooks/useWebSocket";
+import { useGameStore } from "@/store/gameStore";
+import { useEffect } from "react";
+
 const GameRoom = () => {
+  const notification = useGameStore((state) => state.notifications);
+  const handleWebSocketMessage = useGameStore(
+    (state) => state.handleWebSocketMessage
+  );
+  const { message, socket } = useWebSocket();
+
+  useEffect(() => {
+    if (!message) return;
+
+    try {
+      handleWebSocketMessage(message);
+    } catch (error) {
+      console.error("Error processing websocket message:", error);
+    }
+  }, [message]);
+
+  useEffect(() => {
+    if (notification) {
+      console.log(notification);
+      // toast({
+      //   description: notification,
+      // });
+    }
+  }, [notification]);
+
   return (
     // TODO Revisionare template
-    <div id="game-room" style={{ display: "none" }}>
-      <div className="flex flex-col items-center h-screen bg-gray-800 text-black">
-        <div className="">
-          <picture>
-            <source
-              srcSet="crabul_logo.png"
-              media="(prefers-color-scheme: dark)"
-            />
-            <img
-              src="crabul_logo.png"
-              alt="Crabul Logo"
-              className="img-fluid"
-              style={{ width: "150px", height: "150px;" }}
-            />
-          </picture>
-        </div>
+
+    <div id="game-room" className="w-full">
+      <div className="w-full flex flex-col items-center h-screen bg-gray-800 text-black">
         <div className="container flex">
           {/* <!-- Left side with stacked player items --> */}
           <div
             id="player-card-container"
             className="w-1/2 flex flex-col gap-2 p-3"
           ></div>
+
           <div className="w-1/2 flex flex-col justify-content-center items-center">
             <div className="flex gap-4 items-center">
               {/* <!-- Deck image --> */}
@@ -63,10 +81,10 @@ const GameRoom = () => {
               <div className="p-3 rounded-lg">
                 <div className="font-bold text-center text-white">
                   <span id="power-container"></span>
+                  {/* TODO Hidden */}
                   <button
                     id="end-turn-button"
-                    className="btn btn-primary"
-                    style={{ display: "none", marginLeft: "20px" }}
+                    className="btn btn-primary hidden"
                   >
                     End Turn
                   </button>
