@@ -1,10 +1,4 @@
-import {
-  createContext,
-  PropsWithChildren,
-  useCallback,
-  useContext,
-  useState,
-} from "react";
+import { createContext, PropsWithChildren, useCallback, useState } from "react";
 
 export const WebSocketContext = createContext<{
   socket: any;

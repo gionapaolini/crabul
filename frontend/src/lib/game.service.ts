@@ -1,12 +1,16 @@
 import { useWebSocket } from "@/hooks/useWebSocket";
+import { useGameStore } from "@/store/gameStore";
+import { useRoomStore } from "@/store/roomStore";
 import { Player } from "@/views/Game/WaitingRoom";
 
 export const startGame = ({ cards, players }: {
     cards: any[],
     players: Player[]
 }) => {
-    // createNotification('Game has started');
+    useGameStore().createNotification('Game has started');
     // waitingRoom.remove(); Route to game room
+    const playerCardContainer = document.getElementById("player-card-container");
+    const mainPlayerCardContainer = document.getElementById("main-player-card-container");
 
     for (let key in players) {
         const newPlayerCards = `
@@ -22,7 +26,7 @@ export const startGame = ({ cards, players }: {
         </div>`;
 
         // TODO Add cards to dom
-        playerCardContainer.insertAdjacentHTML("beforeend", newPlayerCards);
+        playerCardContainer?.insertAdjacentHTML("beforeend", newPlayerCards);
     }
 
     for (let i in [...Array(4).keys()]) {
@@ -31,11 +35,13 @@ export const startGame = ({ cards, players }: {
         `;
 
         // TODO Add cards to dom
-        mainPlayerCardContainer.insertAdjacentHTML("beforeend", playerCard);
+        mainPlayerCardContainer && (mainPlayerCardContainer.insertAdjacentHTML("beforeend", playerCard));
     }
 
-    document.getElementById("main-card-0").src = getCardImage(cards[0]);
-    document.getElementById("main-card-1").src = getCardImage(cards[1]);
+    const mainCard0 = document.getElementById("main-card-0") as HTMLImageElement;
+    const mainCard1 = document.getElementById("main-card-1") as HTMLImageElement;
+    mainCard0 && (mainCard0.src = getCardImage(cards[0]));
+    mainCard1 && (mainCard1.src = getCardImage(cards[1]));
 
     // gameRoom.style.display = "block";
 
@@ -74,13 +80,15 @@ const initializeDragAndDrop = () => {
             socket.send(`/throw ${other_player_id} ${other_card_idx}`);
         } else {
             const card_idx = draggedCardId?.split("-")[2];
-            socket.send(`/throw ${userPlayerId} ${card_idx}`);
+            socket.send(`/throw ${useRoomStore().myPlayerId} ${card_idx}`);
         }
     });
 }
 
 const initializeDraggableCard = (card: any) => {
     const { socket } = useWebSocket();
+    const powerState = useGameStore().powerState;
+    const powerContainer = document.getElementById("power-container");
 
     card.addEventListener('dragstart', (e: any) => {
         e.dataTransfer.setData('text/plain', card.id); // Store dragged card's ID
@@ -98,7 +106,7 @@ const initializeDraggableCard = (card: any) => {
         if (powerState == "Swap") {
             const card_idx = card.id.split("-")[2];
             socket.send(`/swap ${card_idx}`);
-            powerContainer.innerText = "";
+            powerContainer && (powerContainer.innerText = "");
         }
         if (powerState == "ChoosingCardToGive") {
             const card_idx = card.id.split("-")[2];
@@ -107,10 +115,11 @@ const initializeDraggableCard = (card: any) => {
     });
 }
 
-const initializeDroppableCard = (card) => {
+const initializeDroppableCard = (card: any) => {
     const { socket } = useWebSocket();
+    const powerState = useGameStore().powerState;
 
-    card.addEventListener('click', (e) => {
+    card.addEventListener('click', (e: any) => {
         if (powerState == "PeekOtherCard") {
             const split = card.id.split("-");
             const other_player_id = split[1];
@@ -125,15 +134,15 @@ const initializeDroppableCard = (card) => {
         }
     });
 
-    card.addEventListener('dragstart', (e) => {
+    card.addEventListener('dragstart', (e: any) => {
         e.dataTransfer.setData('text/plain', card.id); // Store dragged card's ID
     });
 
-    card.addEventListener('dragover', (e) => {
+    card.addEventListener('dragover', (e: any) => {
         e.preventDefault(); // Allow drop
     });
 
-    card.addEventListener('drop', (e) => {
+    card.addEventListener('drop', (e: any) => {
         e.preventDefault();
 
         const draggedCardId = e.dataTransfer.getData('text/plain'); // Get dragged card ID
@@ -152,4 +161,24 @@ const initializeDroppableCard = (card) => {
             socket.send(`/pow3 ${card_idx} ${other_player_id} ${other_card_idx}`);
         }
     });
+}
+
+export const getCardImage = (card: any): string => {
+    if (card === "Joker") {
+        return "cards/joker.svg";
+    }
+    if ("Clubs" in card) {
+        return `cards/0_${card["Clubs"]}.svg`;
+    }
+    if ("Diamonds" in card) {
+        return `cards/1_${card["Diamonds"]}.svg`;
+    }
+    if ("Hearts" in card) {
+        return `cards/2_${card["Hearts"]}.svg`;
+    }
+    if ("Spade" in card) {
+        return `cards/3_${card["Spade"]}.svg`;
+    }
+    alert(`Card not recognized: ${JSON.stringify(card)}`)
+    return ""
 }

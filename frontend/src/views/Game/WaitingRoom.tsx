@@ -1,9 +1,9 @@
 import { AnimatedList } from "@/components/ui/animated-list";
 import ShineBorder from "@/components/ui/shine-border";
-import { useRoomState } from "@/hooks/useRoomState";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { getSocketMessage } from "@/lib/websocket.utils";
 import { WebSocketDataType } from "@/models/WebSocketDataType";
+import { useRoomStore } from "@/store/roomStore";
 import React, { useEffect, useState } from "react";
 import { Location, useLocation, useNavigate } from "react-router";
 
@@ -22,7 +22,9 @@ const WaitingRoom = () => {
     };
   } = useLocation();
   const { connect, message } = useWebSocket();
-  const { state, handlers } = useRoomState();
+
+  const state = useRoomStore();
+
   const [countdown, setCountdown] = useState<number | null>(null);
 
   useEffect(() => {
@@ -53,8 +55,8 @@ const WaitingRoom = () => {
       );
 
       if (playerJoined)
-        handlers.handlePlayerJoined(playerJoined, location.state.playerName);
-      if (playerLeft) handlers.handlePlayerLeft(playerLeft);
+        state.handlePlayerJoined(playerJoined, location.state.playerName);
+      if (playerLeft) state.handlePlayerLeft(playerLeft);
     } catch (error) {
       console.error("Error processing websocket message:", error);
     }
