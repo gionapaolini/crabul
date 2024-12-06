@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { useRoomStore } from "./roomStore";
 import { WebSocketDataType } from "@/models/WebSocketDataType";
-import { getCardImage, startGame } from "@/lib/game.service";
+import { addCard, coverCards, getCardImage, highlightCurrentPlayer, removeCard, sendPowerUsedNotification, startGame } from "@/lib/game.service";
 
 type WebSocketMessage<T = any> = {
     [K in WebSocketDataType]: T;
@@ -12,7 +12,6 @@ type MessageHandlers = {
 };
 
 interface GameState {
-    // players: Record<string, string>
     powerState: string
     discardPile: string | null
     cards: string[]
@@ -81,7 +80,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         const crabulButton = document.getElementById("crabul-btn") as HTMLButtonElement;
         endTurnButton.style.display = "none"; //check a better place to put ths
 
-        const myPlayerId = useRoomStore.getState().myPlayerId;
+        const myPlayerId = useRoomStore.getState().myPlayerId || -1;
         const players = useRoomStore.getState().players_list;
 
         if (message === myPlayerId) {
@@ -94,13 +93,14 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
             crabulButton.disabled = true;
         }
         coverCards();
-        highlightCurrentPlayer(message);
+        highlightCurrentPlayer({ id: message, myPlayerId: +myPlayerId });
     },
     handleCardWasDrawn: (message: any) => {
         const myPlayerId = useRoomStore.getState().myPlayerId;
         const players = useRoomStore.getState().players_list;
         const drawButton = document.getElementById("draw-card-btn") as HTMLButtonElement;
         const crabulButton = document.getElementById("crabul-btn") as HTMLButtonElement;
+
         if (message != myPlayerId) {
             get().createNotification(`Player ${players[message]} drew a card from the deck`);
         } else {
@@ -168,7 +168,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         const endTurnButton = document.getElementById("end-turn-button") as HTMLElement;
 
         if (message[1] != myPlayerId) {
-            sendPowerUsedNotification(message);
+            sendPowerUsedNotification({ power: message });
         } else {
             if (message[0] === "CheckAndSwapStage1") {
                 set({ powerState: "CheckAndSwapStage2" })
@@ -189,7 +189,8 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         peekedCardModal.style.display = 'flex';
     },
     handleGameTerminated: (message: any) => {
-        showGameResults(data);
+        // TODO
+        // showGameResults(data);
     },
     handleSameCardAttempt: (message: any) => {
         const players = useRoomStore.getState().players_list;
@@ -197,7 +198,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         const discardPile = document.getElementById("discard-pile") as HTMLImageElement;
 
         if (message[4] !== "Success") {
-            addCard(message[0]);
+            addCard({ userId: message[0], players });
             if (message[0] in players) {
                 get().createNotification(`${players[message[0]]} attempted to throw a diplicate unsuccessfully: ${message[4]}, receiving a penalty card`);
             } else {
@@ -210,7 +211,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
                 get().createNotification(`You threw a duplicate successfully`);
             }
 
-            removeCard(message[1]);
+            removeCard({ userId: message[1], players });
 
             if (message[0] != message[1]) {
                 set({ powerState: get().oldPowerState })
@@ -236,8 +237,8 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         if (message[0] in players) {
             get().createNotification(`${players[message[0]]} have replaced the duplicate with card ${message[1]}`);
         }
-        removeCard(message[0]);
-        addCard(message[2]);
+        removeCard({ userId: message[0], players });
+        addCard({ userId: message[2], players: players });
 
         set({ powerState: get().oldPowerState })
         powerContainer.innerText = get().oldPowerContainerText || "";

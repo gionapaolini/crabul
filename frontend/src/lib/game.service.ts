@@ -9,8 +9,8 @@ export const startGame = ({ cards, players }: {
 }) => {
     useGameStore().createNotification('Game has started');
     // waitingRoom.remove(); Route to game room
-    const playerCardContainer = document.getElementById("player-card-container");
-    const mainPlayerCardContainer = document.getElementById("main-player-card-container");
+    const playerCardContainer = document.getElementById("player-card-container") as HTMLElement;
+    const mainPlayerCardContainer = document.getElementById("main-player-card-container") as HTMLElement;;
 
     for (let key in players) {
         const newPlayerCards = `
@@ -35,13 +35,13 @@ export const startGame = ({ cards, players }: {
         `;
 
         // TODO Add cards to dom
-        mainPlayerCardContainer && (mainPlayerCardContainer.insertAdjacentHTML("beforeend", playerCard));
+        mainPlayerCardContainer.insertAdjacentHTML("beforeend", playerCard);
     }
 
     const mainCard0 = document.getElementById("main-card-0") as HTMLImageElement;
     const mainCard1 = document.getElementById("main-card-1") as HTMLImageElement;
-    mainCard0 && (mainCard0.src = getCardImage(cards[0]));
-    mainCard1 && (mainCard1.src = getCardImage(cards[1]));
+    mainCard0.src = getCardImage(cards[0]);
+    mainCard1.src = getCardImage(cards[1]);
 
     // gameRoom.style.display = "block";
 
@@ -181,4 +181,132 @@ export const getCardImage = (card: any): string => {
     }
     alert(`Card not recognized: ${JSON.stringify(card)}`)
     return ""
+}
+
+export const coverCards = () => {
+    const cards = document.querySelectorAll('[id^="main-card-"]') as NodeListOf<HTMLImageElement>;
+    // Change the src of each matched element (assuming they're images)
+    cards.forEach(card => {
+        card.src = "cards/retro.svg";
+    });
+}
+
+export const highlightCurrentPlayer = ({ id, myPlayerId }: { id: string; myPlayerId: number }) => {
+    const mainPlayerCardContainer = document.getElementById("main-player-card-container") as HTMLElement;
+
+    let playerDiv: HTMLElement;
+    // console.log("Current player turn is " + id + " player id is: " + userPlayerId);
+    mainPlayerCardContainer.classList.remove("highlight-shadow");
+    const playerDivs = document.querySelectorAll('[id^="container-player-"]');
+
+    playerDivs.forEach(pdiv => {
+        pdiv.classList.remove("highlight-shadow");
+    });
+
+    if (+id === +myPlayerId) {
+        playerDiv = mainPlayerCardContainer;
+    } else {
+        playerDiv = document.getElementById(`container-player-${id}`) as HTMLElement;
+
+    }
+    playerDiv.classList.add("highlight-shadow");
+}
+
+
+export const addCard = ({ userId, players }: { userId: any, players: any }) => {
+    if (userId in players) {
+        let cards = document.querySelectorAll(`[id^="player-${userId}-card-"]`);
+        const playerCard = `
+            <img id="player-${userId}-card-${cards.length}" src="cards/retro.svg" alt="Card" class="img-fluid hover-zoom" style="width: 60px;" draggable="true">
+        `;
+
+        const container = document.getElementById(`cards-container-player-${userId}`) as HTMLElement;
+        container.insertAdjacentHTML("beforeend", playerCard);
+
+        initializeDroppableCard(document.getElementById(`player-${userId}-card-${cards.length}`));
+    } else {
+        let cards = document.querySelectorAll(`[id^="main-card-"]`);
+
+        const playerCard = `
+            <img id="main-card-${cards.length}" src="cards/retro.svg" alt="Card" class="img-fluid hover-zoom" style="width: 70px;" draggable="true">    
+        `;
+        const mainPlayerCardContainer = document.getElementById("main-player-card-container") as HTMLElement;
+        mainPlayerCardContainer.insertAdjacentHTML("beforeend", playerCard);
+        initializeDraggableCard(document.getElementById(`main-card-${cards.length}`));
+    }
+}
+
+export const removeCard = ({ userId, players }: { userId: any, players: any }) => {
+    if (userId in players) {
+        let cards = document.querySelectorAll(`[id^="player-${userId}-card-"]`);
+        const card = document.getElementById(`player-${userId}-card-${cards.length - 1}`) as HTMLElement;
+        card.remove();
+    } else {
+        let cards = document.querySelectorAll(`[id^="main-card-"]`);
+        const card = document.getElementById(`main-card-${cards.length - 1}`) as HTMLElement;
+        card.remove();
+    }
+}
+
+export const sendPowerUsedNotification = ({ power }: { power: any }) => {
+    const players = useRoomStore().players_list;
+    const createNotification = useGameStore().createNotification;
+
+    if (power[0] === "PeekOwnCard") {
+        if (power[1] in players) {
+            createNotification(`Player ${players[power[1]]} peeked his own card at position ${power[2] + 1}`);
+        }
+        return;
+    }
+    if (power[0] === "PeekOtherCard") {
+        if (power[3] in players) {
+            createNotification(
+                `Player ${players[power[1]]} peeked card ${power[4] + 1} of player ${players[power[3]]}`);
+        } else {
+            createNotification(`Player ${players[power[1]]} peeked your card ${power[4] + 1}`);
+        }
+        return;
+    }
+    if (power[0] === "BlindSwap") {
+        if (power[3] in players) {
+            createNotification(
+                `Player ${players[power[1]]} blind swapped card ${power[2] + 1} with card ${power[4] + 1} of player ${players[power[3]]}`
+            );
+        } else {
+            createNotification(
+                `Player ${players[power[1]]} blind swapped card ${power[2] + 1} with your card ${power[4] + 1}`
+            );
+        }
+        return;
+    }
+
+    if (power[0] === "CheckAndSwapStage1") {
+        if (power[3] in players) {
+            createNotification(
+                `Player ${players[power[1]]} peeked card ${power[4] + 1} of player ${players[power[3]]} and is deciding whether to swap`
+            );
+        } else {
+            createNotification(
+                `Player ${players[power[1]]} peeked your card ${power[2] + 1} and is deciding whether to swap`
+            );
+        }
+        return;
+    }
+
+    if ("CheckAndSwapStage2" in power[0]) {
+        if (power[2] != null) {
+            if (power[3] in players) {
+                createNotification(
+                    `Player ${players[power[1]]} swapped card ${power[2] + 1} with card ${power[4] + 1} of player ${players[power[3]]}`
+                );
+            } else {
+                createNotification(
+                    `Player ${players[power[1]]} swapped card ${power[2] + 1} with your card ${power[4] + 1}`
+                );
+            }
+        } else {
+            createNotification(`Player ${players[power[1]]} decided not to swap`);
+        }
+        return;
+    }
 }

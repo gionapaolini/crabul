@@ -1,13 +1,16 @@
 import { CoolMode } from "@/components/ui/cool-mode";
 import SparklesText from "@/components/ui/sparkles-text";
-import { useState } from "react";
+import { useRoomStore } from "@/store/roomStore";
 import { useNavigate } from "react-router";
 
 const StartGame = () => {
   let navigate = useNavigate();
 
-  const [playerName, setPlayerName] = useState<string | null>(null);
-  const [roomCode, setRoomCode] = useState<string | null>(null);
+  const setRoomId = useRoomStore((state) => state.setRoomId);
+  const setMyPlayerName = useRoomStore((state) => state.setMyPlayerName);
+
+  const playerName = useRoomStore((state) => state.myPlayerName);
+  const roomId = useRoomStore((state) => state.roomId);
 
   return (
     <>
@@ -31,7 +34,7 @@ const StartGame = () => {
                 <input
                   type="text"
                   id="name"
-                  onChange={(e) => setPlayerName(e.target.value)}
+                  onChange={(e) => setMyPlayerName(e.target.value)}
                   placeholder="Enter your name"
                   className="p-4 bg-white bg-opacity-90 rounded-lg font-game mb-2"
                 />
@@ -42,9 +45,7 @@ const StartGame = () => {
                   type="button"
                   onClick={() => {
                     // start connection to new room server
-                    navigate("/waiting-room", {
-                      state: { playerName: playerName },
-                    });
+                    navigate("/waiting-room");
                   }}
                 >
                   <SparklesText
@@ -61,7 +62,7 @@ const StartGame = () => {
                   <input
                     id="room-code-input"
                     type="text"
-                    onChange={(e) => setRoomCode(e.target.value)}
+                    onChange={(e) => setRoomId(e.target.value)}
                     className="p-4 bg-white bg-opacity-90 w-full rounded-l-lg font-game"
                     placeholder="Enter room code"
                   />
@@ -78,12 +79,10 @@ const StartGame = () => {
                       id="join-room-button"
                       type="button"
                       className="btn-game text-white rounded-r-lg p-2 min-w-fit font-game text-3xl"
-                      disabled={playerName == "" && roomCode == ""}
+                      disabled={playerName == "" && roomId == ""}
                       onClick={() => {
                         // start connection to existing room server
-                        navigate("/waiting-room", {
-                          state: { playerName, roomCode },
-                        });
+                        navigate("/waiting-room");
                       }}
                     >
                       <SparklesText

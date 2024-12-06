@@ -1,18 +1,16 @@
 import { WebSocketProvider } from "@/context/WebSocketContext";
-import { Navigate, Outlet, useLocation, useParams } from "react-router";
+import { useRoomStore } from "@/store/roomStore";
+import { Navigate, Outlet } from "react-router";
 
 const GameLayout = () => {
-  const { name } = useParams();
-  const { state } = useLocation();
+  const playerName = useRoomStore((state) => state.myPlayerName);
 
-  const initialName = name || state?.playerName;
-
-  if (!initialName) {
+  if (!playerName) {
     return <Navigate to="/" replace />;
   }
 
   return (
-    <WebSocketProvider initialName={initialName}>
+    <WebSocketProvider initialName={playerName}>
       <Outlet />
     </WebSocketProvider>
   );

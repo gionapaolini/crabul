@@ -15,6 +15,7 @@ export interface Player {
 
 const WaitingRoom = () => {
   const navigate = useNavigate();
+
   const location: Location & {
     state: {
       playerName: string;
@@ -68,9 +69,10 @@ const WaitingRoom = () => {
         if (countdown > 0) {
           setCountdown(countdown - 1);
         } else {
+          navigate("/play");
           setCountdown(null);
         }
-      }, 1500); // Change number every 1.5 seconds
+      }, 1000);
       return () => clearTimeout(timer);
     }
   }, [countdown]);
@@ -151,7 +153,7 @@ const WaitingRoom = () => {
                         <div className="flex items-center">
                           {
                             state.players.find(
-                              (player) => +player.id == state.myPlayerId
+                              (player) => player.id == state.myPlayerId
                             )?.name
                           }
                           <span className="text-black text-2xl">
@@ -161,7 +163,7 @@ const WaitingRoom = () => {
                       </div>
 
                       {state.players
-                        .filter((player) => +player.id != state.myPlayerId)
+                        .filter((player) => player.id != state.myPlayerId)
                         .map((player, index) => (
                           <React.Fragment key={index}>
                             <div className="font-game text-white text-4xl flex justify-between items-center">

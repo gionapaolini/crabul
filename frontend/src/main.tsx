@@ -4,6 +4,7 @@ import "./index.css";
 import GameLayout from "./routes/gameLayout.tsx";
 import WaitingRoom from "./views/Game/WaitingRoom.tsx";
 import StartGame from "./views/StartGame.tsx";
+import GameRoom from "./views/Game/GameRoom.tsx";
 
 createRoot(document.getElementById("root")!).render(
   <BrowserRouter>
@@ -13,6 +14,7 @@ createRoot(document.getElementById("root")!).render(
       {/* Game */}
       <Route element={<GameLayout />}>
         <Route path="waiting-room" element={<WaitingRoom />} />
+        <Route path="play" element={<GameRoom />} />
       </Route>
     </Routes>
   </BrowserRouter>

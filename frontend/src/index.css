@@ -145,5 +145,5 @@ input {
 }
 
 .countdown-number {
-  animation: fadeInOut 1.5s forwards infinite;
+  animation: fadeInOut 1s forwards infinite;
 }
