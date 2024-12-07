@@ -1,10 +1,8 @@
 import { PlayerJoinedRes } from "@/models/WebSocketDataType";
-import { Player } from "@/views/Game/WaitingRoom";
 import { create } from "zustand";
 
 interface RoomState {
-    players: Player[];
-    players_list: any;
+    players_list: Record<string, string>;
     roomId: string | null;
     myPlayerId: string | null;
     myPlayerName: string;
@@ -12,7 +10,7 @@ interface RoomState {
 
 interface RoomActions {
     updatePlayers: (playerList: Record<string, string>) => void;
-    handlePlayerJoined: (payload: PlayerJoinedRes, myPlayerName: string) => void;
+    handlePlayerJoined: (payload: PlayerJoinedRes) => void;
     handlePlayerLeft: (playerId: number) => void;
     setRoomId: (roomId: string) => void;
     setMyPlayerId: (myPlayerId: string) => void;
@@ -21,33 +19,24 @@ interface RoomActions {
 
 export const useRoomStore = create<RoomState & RoomActions>((set, get) => ({
     players_list: {}, // same as the api
-    players: [], // manipulated
     roomId: null,
-    myPlayerName: "",
     myPlayerId: null,
-
-    updatePlayers: (playerList: Record<string, string>) => {
-        const players = Object.entries(playerList).map(
-            ([id, name]): Player => ({
-                id,
-                name,
-                isReady: false,
-            })
-        );
-
-        set({ players_list: playerList });
-        set({ players });
-    },
-    handlePlayerJoined: (payload: PlayerJoinedRes, myPlayerName: string) => {
+    myPlayerName: "",
+    updatePlayers: (playerList: Record<string, string>) => set({ players_list: playerList }),
+    handlePlayerJoined: (payload: PlayerJoinedRes) => {
         const { player_id, player_name, room_id, player_list } = payload;
+
         set({
             roomId: room_id.toString(),
-            myPlayerId: player_name === myPlayerName ? player_id.toString() : get().myPlayerId,
-        });
+            myPlayerId: player_name == get().myPlayerName ? player_id.toString() : get().myPlayerId,
+        })
+
         get().updatePlayers(player_list);
     },
-    handlePlayerLeft: (playerId: number) => {
-        set((state) => ({ players: state.players.filter((p) => +p.id !== playerId) }));
+    handlePlayerLeft: (playerLeftId: number) => {
+        const newList = { ...get().players_list };
+        delete newList[playerLeftId.toString()];
+        set({ players_list: newList });
     },
     setRoomId: (roomId: string) => set({ roomId }),
     setMyPlayerId: (myPlayerId: string) => set({ myPlayerId }),

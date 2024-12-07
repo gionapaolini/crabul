@@ -1,5 +1,4 @@
 import { Toaster } from "@/components/ui/toaster";
-import { WebSocketProvider } from "@/context/WebSocketContext";
 import { useRoomStore } from "@/store/roomStore";
 import { Outlet } from "react-router";
 
@@ -11,7 +10,8 @@ const GameLayout = () => {
   // }
 
   return (
-    <WebSocketProvider initialName={playerName}>
+    <>
+      {/* <WebSocketProvider initialName={playerName}> */}
       <main
         className="min-h-screen flex flex-col bg-center bg-cover"
         style={{ backgroundImage: "url(sfondo-pattern.jpg)" }}
@@ -30,7 +30,8 @@ const GameLayout = () => {
         </div>
       </main>
       <Toaster />
-    </WebSocketProvider>
+      {/* </WebSocketProvider> */}
+    </>
   );
 };
 

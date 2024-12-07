@@ -1,40 +1,44 @@
-import { useWebSocket } from "@/hooks/useWebSocket";
 import { useGameStore } from "@/store/gameStore";
 import { useRoomStore } from "@/store/roomStore";
-import { Player } from "@/views/Game/WaitingRoom";
+import { useSocketStore } from "@/store/socketStore";
 
 export const startGame = ({ cards, players }: {
     cards: any[],
-    players: Player[]
+    players: Record<string, string>
 }) => {
-    useGameStore().createNotification('Game has started');
-    // waitingRoom.remove(); Route to game room
-    const playerCardContainer = document.getElementById("player-card-container") as HTMLElement;
-    const mainPlayerCardContainer = document.getElementById("main-player-card-container") as HTMLElement;;
+    console.log("startGame");
+    useSocketStore.getState().setNavigation("/play")
+    useGameStore.getState().createNotification('Game has started');
 
-    for (let key in players) {
+    const playerCardContainer = document.getElementById("player-card-container") as HTMLElement;
+    const mainPlayerCardContainer = document.getElementById("main-player-card-container") as HTMLElement;
+
+    const myPlayerId = useRoomStore.getState().myPlayerId;
+    const playersWithoutMe = Object.fromEntries(
+        Object.entries(players).filter(([playerId]) => playerId !== myPlayerId?.toString())
+    );
+
+    for (let key in playersWithoutMe) {
         const newPlayerCards = `
         <div id="container-player-${key}" class="bg-secondary text-black p-3 rounded position-relative">
             <img id="crabul-badge-${key}" src="crabul-badge.svg" alt="CRABUL!" class="crabul-badge d-none">
             <div class="fw-bold">${players[key]}</div>
-            <div id="cards-container-player-${key}"class="d-flex gap-3 p-2 mt-2">
-                <img id="player-${key}-card-0" src="cards/retro.svg" alt="Card" class="img-fluid hover-zoom" style="width: 60px;" draggable="true">
-                <img id="player-${key}-card-1" src="cards/retro.svg" alt="Card" class="img-fluid hover-zoom" style="width: 60px;" draggable="true">
-                <img id="player-${key}-card-2" src="cards/retro.svg" alt="Card" class="img-fluid hover-zoom" style="width: 60px;" draggable="true">
-                <img id="player-${key}-card-3" src="cards/retro.svg" alt="Card" class="img-fluid hover-zoom" style="width: 60px;" draggable="true">
+            <div id="cards-container-player-${key}"class="flex gap-3 p-2 mt-2">
+                <img id="player-${key}-card-0" src="cards/retro.svg" alt="Card" class="img-fluid hover:scale-105" style="width: 60px;" draggable="true">
+                <img id="player-${key}-card-1" src="cards/retro.svg" alt="Card" class="img-fluid hover:scale-105" style="width: 60px;" draggable="true">
+                <img id="player-${key}-card-2" src="cards/retro.svg" alt="Card" class="img-fluid hover:scale-105" style="width: 60px;" draggable="true">
+                <img id="player-${key}-card-3" src="cards/retro.svg" alt="Card" class="img-fluid hover:scale-105" style="width: 60px;" draggable="true">
             </div>
         </div>`;
 
-        // TODO Add cards to dom
-        playerCardContainer?.insertAdjacentHTML("beforeend", newPlayerCards);
+        playerCardContainer.insertAdjacentHTML("beforeend", newPlayerCards);
     }
 
-    for (let i in [...Array(4).keys()]) {
+    for (let i in [1, 2, 3, 4]) {
         const playerCard = `
-            <img id="main-card-${i}" src="cards/retro.svg" alt="Card" class="img-fluid hover-zoom" style="width: 70px;" draggable="true">    
+            <img id="main-card-${i}" src="cards/retro.svg" alt="Card" class="img-fluid hover:scale-105" style="width: 70px;" draggable="true">    
         `;
 
-        // TODO Add cards to dom
         mainPlayerCardContainer.insertAdjacentHTML("beforeend", playerCard);
     }
 
@@ -43,13 +47,12 @@ export const startGame = ({ cards, players }: {
     mainCard0.src = getCardImage(cards[0]);
     mainCard1.src = getCardImage(cards[1]);
 
-    // gameRoom.style.display = "block";
-
     initializeDragAndDrop();
 }
 
 const initializeDragAndDrop = () => {
-    const { socket } = useWebSocket();
+    const socket = useSocketStore.getState().socket;
+    const myPlayerId = useRoomStore.getState().myPlayerId
 
     const draggableCards = document.querySelectorAll('#main-player-card-container img[draggable="true"]');
     const droppableCards = document.querySelectorAll('[id^="cards-container-player-"] img');
@@ -80,14 +83,14 @@ const initializeDragAndDrop = () => {
             socket.send(`/throw ${other_player_id} ${other_card_idx}`);
         } else {
             const card_idx = draggedCardId?.split("-")[2];
-            socket.send(`/throw ${useRoomStore().myPlayerId} ${card_idx}`);
+            socket.send(`/throw ${myPlayerId} ${card_idx}`);
         }
     });
 }
 
 const initializeDraggableCard = (card: any) => {
-    const { socket } = useWebSocket();
-    const powerState = useGameStore().powerState;
+    const socket = useSocketStore.getState().socket;
+    const powerState = useGameStore.getState().powerState
     const powerContainer = document.getElementById("power-container");
 
     card.addEventListener('dragstart', (e: any) => {
@@ -116,8 +119,8 @@ const initializeDraggableCard = (card: any) => {
 }
 
 const initializeDroppableCard = (card: any) => {
-    const { socket } = useWebSocket();
-    const powerState = useGameStore().powerState;
+    const socket = useSocketStore.getState().socket;
+    const powerState = useGameStore.getState().powerState
 
     card.addEventListener('click', (e: any) => {
         if (powerState == "PeekOtherCard") {
@@ -217,7 +220,7 @@ export const addCard = ({ userId, players }: { userId: any, players: any }) => {
     if (userId in players) {
         let cards = document.querySelectorAll(`[id^="player-${userId}-card-"]`);
         const playerCard = `
-            <img id="player-${userId}-card-${cards.length}" src="cards/retro.svg" alt="Card" class="img-fluid hover-zoom" style="width: 60px;" draggable="true">
+            <img id="player-${userId}-card-${cards.length}" src="cards/retro.svg" alt="Card" class="img-fluid hover:scale-105" style="width: 60px;" draggable="true">
         `;
 
         const container = document.getElementById(`cards-container-player-${userId}`) as HTMLElement;
@@ -228,7 +231,7 @@ export const addCard = ({ userId, players }: { userId: any, players: any }) => {
         let cards = document.querySelectorAll(`[id^="main-card-"]`);
 
         const playerCard = `
-            <img id="main-card-${cards.length}" src="cards/retro.svg" alt="Card" class="img-fluid hover-zoom" style="width: 70px;" draggable="true">    
+            <img id="main-card-${cards.length}" src="cards/retro.svg" alt="Card" class="img-fluid hover:scale-105" style="width: 70px;" draggable="true">    
         `;
         const mainPlayerCardContainer = document.getElementById("main-player-card-container") as HTMLElement;
         mainPlayerCardContainer.insertAdjacentHTML("beforeend", playerCard);
@@ -249,8 +252,8 @@ export const removeCard = ({ userId, players }: { userId: any, players: any }) =
 }
 
 export const sendPowerUsedNotification = ({ power }: { power: any }) => {
-    const players = useRoomStore().players_list;
-    const createNotification = useGameStore().createNotification;
+    const createNotification = useGameStore.getState().createNotification;
+    const players = useRoomStore.getState().players_list
 
     if (power[0] === "PeekOwnCard") {
         if (power[1] in players) {

@@ -20,7 +20,6 @@ interface GameState {
     oldPowerContainerText?: string
 }
 interface GameActions {
-    handleWebSocketMessage: (data: any) => void;
     handlePickingPhase: (data: any) => void;
     handlePlayerTurn: (data: any) => void;
     handleCardWasDrawn: (data: any) => void;
@@ -44,35 +43,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     discardPile: null,
     cards: [],
     notifications: {},
-    handleWebSocketMessage: (message: WebSocketMessage) => {
-        console.log(message);
-        const messageHandlers: MessageHandlers = {
-            [WebSocketDataType.PeekingPhaseStarted]: get().handlePickingPhase,
-            [WebSocketDataType.PlayerTurn]: get().handlePlayerTurn,
-            [WebSocketDataType.CardWasDrawn]: get().handleCardWasDrawn,
-            [WebSocketDataType.PlayerWentCrabul]: get().handlePlayerWentCrabul,
-            [WebSocketDataType.DrawnCard]: get().handleDrawnCard,
-            [WebSocketDataType.CardSwapped]: get().handleCardSwapped,
-            [WebSocketDataType.CardDiscarded]: get().handleCardDiscarded,
-            [WebSocketDataType.PowerUsed]: get().handlePowerUsed,
-            [WebSocketDataType.PeekedCard]: get().handlePeekedCard,
-            [WebSocketDataType.GameTerminated]: get().handleGameTerminated,
-            [WebSocketDataType.SameCardAttempt]: get().handleSameCardAttempt,
-            [WebSocketDataType.CardReplaced]: get().handleCardReplaced,
-        };
-
-        const messageType = Object.keys(message)[0] as WebSocketDataType;
-        const handler = messageHandlers[messageType];
-
-        if (handler) {
-            console.log(message);
-            handler(message[messageType]);
-        } else {
-            console.warn(`No handler found for message type: ${messageType}`);
-        }
-    },
     handlePickingPhase: (message: any) => {
-        console.log("Picking phase started", message);
         const players = useRoomStore.getState().players_list;
         startGame({ cards: message, players });
     },
@@ -246,7 +217,6 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         powerContainer.innerText = get().oldPowerContainerText || "";
     },
     createNotification: (message: string) => {
-        console.log(message);
         set({ notifications: message })
     }
 }))

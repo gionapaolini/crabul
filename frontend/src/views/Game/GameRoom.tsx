@@ -1,31 +1,31 @@
 import { toast } from "@/hooks/use-toast";
-import { useWebSocket } from "@/hooks/useWebSocket";
 import { useGameStore } from "@/store/gameStore";
+import { useSocketStore } from "@/store/socketStore";
 import { useEffect } from "react";
 
 const GameRoom = () => {
   const notification = useGameStore((state) => state.notifications);
-  const handleWebSocketMessage = useGameStore(
+
+  const handleWebSocketMessage = useSocketStore(
     (state) => state.handleWebSocketMessage
   );
-  const { message, socket } = useWebSocket();
+  const socketMessage = useSocketStore((state) => state.message);
 
   useEffect(() => {
-    if (!message) return;
+    if (!socketMessage) return;
 
     try {
-      handleWebSocketMessage(message);
+      handleWebSocketMessage(socketMessage);
     } catch (error) {
       console.error("Error processing websocket message:", error);
     }
-  }, [message]);
+  }, [socketMessage]);
 
   useEffect(() => {
-    if (notification) {
-      console.log(notification);
-      // toast({
-      //   description: notification,
-      // });
+    if (typeof notification == "string") {
+      toast({
+        description: notification,
+      });
     }
   }, [notification]);
 
