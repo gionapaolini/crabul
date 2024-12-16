@@ -147,3 +147,144 @@ input {
 .countdown-number {
   animation: fadeInOut 1s forwards infinite;
 }
+
+/* Custom Colors */
+body {
+  background-color: #fafafa;
+  /* Light, neutral background */
+  color: #4b4b4b;
+  /* Dark gray text for better readability */
+}
+
+.bg-dark {
+  background-color: #6c5ce7 !important;
+  /* Soft purple background for contrast */
+}
+
+.text-white {
+  color: #ffffff !important;
+  /* Keeping white text on the purple background */
+}
+
+.bg-secondary {
+  background-color: #fff1f3 !important;
+  /* Soft pink background for the form */
+  color: #4b4b4b;
+  /* Darker text for readability */
+  border-radius: 12px;
+  /* More rounded corners */
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+  /* Softer, more prominent shadow */
+}
+
+.btn-primary {
+  background-color: #ff6b81;
+  /* Light coral pink for buttons */
+  border-color: #ff4e63;
+  /* Slightly darker pink for the button border */
+}
+
+.btn-primary:hover {
+  background-color: #ff4e63;
+  /* Darker pink on hover */
+  border-color: #ff3351;
+  /* Even darker pink for hover effect */
+}
+
+.input-group-text {
+  background-color: #f0f8ff;
+  /* Light pastel blue background for input group */
+  color: #4b4b4b;
+}
+
+.form-control {
+  border-radius: 8px;
+  /* Rounded corners for input fields */
+}
+
+.highlight-shadow {
+  box-shadow: 0 0 15px 5px rgba(255, 255, 255, 0.7);
+  /* Light white glow */
+}
+
+.hover-zoom:hover {
+  transform: scale(1.1);
+  transition: transform 0.3s;
+}
+
+/* Notification container for stacking */
+#notification-container {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px; /* Space between notifications */
+  width: 300px; /* Optional fixed width */
+}
+
+/* Individual notification style */
+.notification {
+  background-color: #007bff;
+  color: white;
+  padding: 15px;
+  border-radius: 5px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+  font-size: 1rem;
+  opacity: 0; /* Hidden initially */
+  transform: translateY(-50px); /* Start above the container */
+  animation: slideIn 0.5s ease-out forwards, fadeOut 0.5s ease-out forwards 25s; /* Slide and fade in */
+}
+
+/* Slide-down and fade-in animation */
+@keyframes slideIn {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Fade-out animation */
+@keyframes fadeOut {
+  to {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
+.custom-modal {
+  display: none; /* Hidden by default */
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5); /* Overlay effect */
+  z-index: 1050; /* Ensure it is above other elements */
+  justify-content: center;
+  align-items: center;
+}
+
+.custom-modal-content {
+  background: white;
+  padding: 20px;
+  border-radius: 10px;
+  text-align: center;
+  max-width: 400px;
+  width: 90%;
+}
+
+.crabul-badge {
+  position: absolute;
+  top: -40px;
+  right: -50px;
+  width: 180px; /* Adjust size as needed */
+  height: auto;
+  z-index: 10;
+}
+
+.larger {
+  max-width: 900px;
+}

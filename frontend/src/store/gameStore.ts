@@ -1,7 +1,9 @@
 import { create } from "zustand";
 import { useRoomStore } from "./roomStore";
 import { WebSocketDataType } from "@/models/WebSocketDataType";
-import { addCard, coverCards, getCardImage, highlightCurrentPlayer, removeCard, sendPowerUsedNotification, startGame } from "@/lib/game.service";
+import { addCard, coverCards, getCardImage, highlightCurrentPlayer, removeCard, sendPowerUsedNotification, showGameResults, startGame } from "@/lib/game.service";
+import { useSocketStore } from "./socketStore";
+import { p } from "framer-motion/client";
 
 type WebSocketMessage<T = any> = {
     [K in WebSocketDataType]: T;
@@ -28,6 +30,7 @@ interface GameActions {
     handleCardSwapped: (data: any) => void;
     handleCardDiscarded: (data: any) => void;
     handlePowerActivated: (data: any) => void;
+    handlePowerDiscarded: (data: any) => void;
     handlePowerUsed: (data: any) => void;
     handlePeekedCard: (data: any) => void;
     handleGameTerminated: (data: any) => void;
@@ -35,9 +38,15 @@ interface GameActions {
     handleCardReplaced: (data: any) => void;
     createNotification: (data: any) => void;
 }
+
+interface UserActions {
+    handleDiscardButton: () => void;
+    handleSwapButton: () => void;
+    handleClosePeekedCardModalButton: () => void;
+}
 // TODO Add Socket store, handle also Room events
 
-export const useGameStore = create<GameState & GameActions>((set, get) => ({
+export const useGameStore = create<GameState & GameActions & UserActions>((set, get) => ({
     // Initial state
     powerState: '',
     discardPile: null,
@@ -56,12 +65,15 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         const myPlayerId = useRoomStore.getState().myPlayerId || -1;
         const players = useRoomStore.getState().players_list;
 
-        if (message === myPlayerId) {
+        if (message == myPlayerId) {
             get().createNotification(`Your turn`);
+            console.log("my turn")
+
             drawButton.disabled = false;
             crabulButton.disabled = false;
         } else {
             get().createNotification(`Player turn: ${players[message]}`);
+            console.log("Other turn")
             drawButton.disabled = true;
             crabulButton.disabled = true;
         }
@@ -90,7 +102,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         if (message != myPlayerId) {
             get().createNotification(`Player ${players[message]} went CRABUL!`);
             const badge = document.getElementById(`crabul-badge-${message}`);
-            badge?.classList.remove('d-none');
+            badge?.classList.remove('hidden');
         } else {
             drawButton.disabled = true;
             crabulButton.disabled = true;
@@ -131,9 +143,11 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
             get().createNotification(`Player ${players[message[0]]} activated a power: ${message[1]}`);
         } else {
             set({ powerState: message[1] })
-
             powerContainer.innerText = "POWER " + message[1] + " ACTIVE!";
         }
+    },
+    handlePowerDiscarded: (message: any) => {
+        console.log("Power discarded", message)
     },
     handlePowerUsed: (message: any) => {
         const myPlayerId = useRoomStore.getState().myPlayerId;
@@ -162,8 +176,13 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         peekedCardModal.style.display = 'flex';
     },
     handleGameTerminated: (message: any) => {
-        // TODO
-        // showGameResults(data);
+        console.log("Game terminated", message)
+        showGameResults({
+            data: message,
+            players: useRoomStore.getState().players_list,
+            myPlayerId: useRoomStore.getState().myPlayerId,
+            myPlayerName: useRoomStore.getState().myPlayerName
+        });
     },
     handleSameCardAttempt: (message: any) => {
         const players = useRoomStore.getState().players_list;
@@ -212,11 +231,29 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         }
         removeCard({ userId: message[0], players });
         addCard({ userId: message[2], players: players });
-
         set({ powerState: get().oldPowerState })
         powerContainer.innerText = get().oldPowerContainerText || "";
     },
     createNotification: (message: string) => {
         set({ notifications: message })
-    }
+    },
+    // USER EVENTS
+    handleDiscardButton: () => {
+        const drawnCardModal = document.getElementById("drawn-card-modal") as HTMLElement;
+        const socket = useSocketStore.getState().socket;
+        socket?.send("/discard");
+        drawnCardModal.style.display = "none";
+    },
+    handleSwapButton: () => {
+        const drawnCardModal = document.getElementById("drawn-card-modal") as HTMLElement;
+        const powerContainer = document.getElementById("power-container") as HTMLElement;
+
+        drawnCardModal.style.display = "none";
+        set({ powerState: "Swap" })
+        powerContainer.innerText = "SWAP WITH ONE OF YOUR CARD!";
+    },
+    handleClosePeekedCardModalButton: () => {
+        const peekedCardModal = document.getElementById("peeked-card-modal") as HTMLElement;
+        peekedCardModal.style.display = 'none';
+    },
 }))

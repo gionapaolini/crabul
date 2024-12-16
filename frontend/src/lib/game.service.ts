@@ -6,7 +6,6 @@ export const startGame = ({ cards, players }: {
     cards: any[],
     players: Record<string, string>
 }) => {
-    console.log("startGame");
     useSocketStore.getState().setNavigation("/play")
     useGameStore.getState().createNotification('Game has started');
 
@@ -80,17 +79,16 @@ const initializeDragAndDrop = () => {
             const other_player_id = split[1];
             const other_card_idx = split[3];
 
-            socket.send(`/throw ${other_player_id} ${other_card_idx}`);
+            socket?.send(`/throw ${other_player_id} ${other_card_idx}`);
         } else {
             const card_idx = draggedCardId?.split("-")[2];
-            socket.send(`/throw ${myPlayerId} ${card_idx}`);
+            socket?.send(`/throw ${myPlayerId} ${card_idx}`);
         }
     });
 }
 
 const initializeDraggableCard = (card: any) => {
     const socket = useSocketStore.getState().socket;
-    const powerState = useGameStore.getState().powerState
     const powerContainer = document.getElementById("power-container");
 
     card.addEventListener('dragstart', (e: any) => {
@@ -98,42 +96,45 @@ const initializeDraggableCard = (card: any) => {
     });
 
     card.addEventListener('click', (e: any) => {
+        const powerState = useGameStore.getState().powerState
+
         if (powerState == "PeekOwnCard") {
             const card_idx = card.id.split("-")[2];
-            socket.send(`/pow1 ${card_idx}`);
+            socket?.send(`/pow1 ${card_idx}`);
         }
         if (powerState == "CheckAndSwapStage2") {
             const card_idx = card.id.split("-")[2];
-            socket.send(`/pow4_2 ${card_idx}`);
+            socket?.send(`/pow4_2 ${card_idx}`);
         }
         if (powerState == "Swap") {
             const card_idx = card.id.split("-")[2];
-            socket.send(`/swap ${card_idx}`);
+            socket?.send(`/swap ${card_idx}`);
             powerContainer && (powerContainer.innerText = "");
         }
         if (powerState == "ChoosingCardToGive") {
             const card_idx = card.id.split("-")[2];
-            socket.send(`/throw_2 ${card_idx}`);
+            socket?.send(`/throw_2 ${card_idx}`);
         }
     });
 }
 
 const initializeDroppableCard = (card: any) => {
     const socket = useSocketStore.getState().socket;
-    const powerState = useGameStore.getState().powerState
 
     card.addEventListener('click', (e: any) => {
+        const powerState = useGameStore.getState().powerState
+
         if (powerState == "PeekOtherCard") {
             const split = card.id.split("-");
             const other_player_id = split[1];
             const other_card_idx = split[3];
-            socket.send(`/pow2 ${other_player_id} ${other_card_idx}`);
+            socket?.send(`/pow2 ${other_player_id} ${other_card_idx}`);
         }
         if (powerState == "CheckAndSwapStage1") {
             const split = card.id.split("-");
             const other_player_id = split[1];
             const other_card_idx = split[3];
-            socket.send(`/pow4_1 ${other_player_id} ${other_card_idx}`);
+            socket?.send(`/pow4_1 ${other_player_id} ${other_card_idx}`);
         }
     });
 
@@ -146,6 +147,8 @@ const initializeDroppableCard = (card: any) => {
     });
 
     card.addEventListener('drop', (e: any) => {
+        const powerState = useGameStore.getState().powerState
+
         e.preventDefault();
 
         const draggedCardId = e.dataTransfer.getData('text/plain'); // Get dragged card ID
@@ -161,7 +164,7 @@ const initializeDroppableCard = (card: any) => {
         const other_card_idx = split[3];
 
         if (powerState == "BlindSwap") { // blind_swap
-            socket.send(`/pow3 ${card_idx} ${other_player_id} ${other_card_idx}`);
+            socket?.send(`/pow3 ${card_idx} ${other_player_id} ${other_card_idx}`);
         }
     });
 }
@@ -198,7 +201,6 @@ export const highlightCurrentPlayer = ({ id, myPlayerId }: { id: string; myPlaye
     const mainPlayerCardContainer = document.getElementById("main-player-card-container") as HTMLElement;
 
     let playerDiv: HTMLElement;
-    // console.log("Current player turn is " + id + " player id is: " + userPlayerId);
     mainPlayerCardContainer.classList.remove("highlight-shadow");
     const playerDivs = document.querySelectorAll('[id^="container-player-"]');
 
@@ -312,4 +314,91 @@ export const sendPowerUsedNotification = ({ power }: { power: any }) => {
         }
         return;
     }
+}
+
+export const showGameResults = ({ data, myPlayerId, myPlayerName, players }: any) => {
+    const gameResultModal = document.getElementById("game-result-modal") as HTMLElement;
+    const scoresContainer = document.getElementById("game-scores") as HTMLElement;
+
+    // Clear previous content
+    scoresContainer.innerHTML = "";
+
+    // Parse the data
+    // const gameData = data.GameTerminated;
+    const gameData = data;
+    const winner = gameData.winner == myPlayerId ? myPlayerName : players[gameData.winner];
+
+    // Create a heading for the winner
+    const winnerHeading = document.createElement("h2");
+    winnerHeading.textContent = `Winner: Player ${winner}`;
+    scoresContainer.appendChild(winnerHeading);
+
+    // Create a table for scores
+    const scoresTable = document.createElement("table");
+    scoresTable.style.width = "100%";
+    scoresTable.style.borderCollapse = "collapse";
+
+    // Add table headers
+    const headers = document.createElement("tr");
+    headers.innerHTML = `
+        <th style="border: 1px solid #ddd; padding: 8px;">Player</th>
+        <th style="border: 1px solid #ddd; padding: 8px;">Cards</th>
+        <th style="border: 1px solid #ddd; padding: 8px;">Total Score</th>
+    `;
+    scoresTable.appendChild(headers);
+
+    const suitMap: any = {
+        Clubs: 0,
+        Diamonds: 1,
+        Hearts: 2,
+        Spade: 3
+    };
+
+    // Add rows for each player
+    gameData.scores.forEach((score: any) => {
+        const row = document.createElement("tr");
+
+        // Player ID
+        const playerIdCell = document.createElement("td");
+        playerIdCell.style.border = "1px solid #ddd";
+        playerIdCell.style.padding = "8px";
+        playerIdCell.textContent = score.player_id == myPlayerId ? myPlayerName : players[score.player_id];
+        row.appendChild(playerIdCell);
+
+        // Cards
+        const cardsCell = document.createElement("td");
+        cardsCell.style.border = "1px solid #ddd";
+        cardsCell.style.padding = "8px";
+        score.cards.forEach((card: any) => {
+            const suit: any = Object.keys(card)[0] as any;
+            const value = card[suit];
+            const suitId = suitMap[suit];
+            const cardImg = document.createElement("img");
+            if (card == "Joker") {
+                cardImg.src = `cards/joker.svg`;
+            } else {
+                cardImg.src = `cards/${suitId}_${value}.svg`;
+            }
+            cardImg.alt = `${value} of ${suit}`;
+            cardImg.style.width = "60px"; // Adjust size as needed
+            cardImg.style.marginRight = "5px";
+
+            cardsCell.appendChild(cardImg);
+        });
+        row.appendChild(cardsCell);
+
+        // Total Score
+        const totalScoreCell = document.createElement("td");
+        totalScoreCell.style.border = "1px solid #ddd";
+        totalScoreCell.style.padding = "8px";
+        totalScoreCell.textContent = score.total_score;
+        row.appendChild(totalScoreCell);
+
+        scoresTable.appendChild(row);
+    });
+
+    scoresContainer.appendChild(scoresTable);
+
+    // Show the modal
+    gameResultModal.style.display = "flex";
 }

@@ -53,7 +53,7 @@ const WaitingRoom = () => {
         if (countdown > 0) {
           setCountdown(countdown - 1);
         } else {
-          socket.send("/start");
+          socket?.send("/start");
           navigate("/play");
           setCountdown(null);
         }

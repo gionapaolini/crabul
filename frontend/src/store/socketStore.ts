@@ -12,7 +12,7 @@ type MessageHandlers = {
 };
 
 interface SocketState {
-    socket: any;
+    socket: WebSocket | null;
     message: string;
     isConnected: boolean;
     navigation: string;
@@ -64,6 +64,7 @@ export const useSocketStore = create<SocketState & SocketActions>((set, get) => 
             [WebSocketDataType.DrawnCard]: useGameStore.getState().handleDrawnCard,
             [WebSocketDataType.CardSwapped]: useGameStore.getState().handleCardSwapped,
             [WebSocketDataType.CardDiscarded]: useGameStore.getState().handleCardDiscarded,
+            [WebSocketDataType.PowerActivated]: useGameStore.getState().handlePowerActivated,
             [WebSocketDataType.PowerUsed]: useGameStore.getState().handlePowerUsed,
             [WebSocketDataType.PeekedCard]: useGameStore.getState().handlePeekedCard,
             [WebSocketDataType.GameTerminated]: useGameStore.getState().handleGameTerminated,
