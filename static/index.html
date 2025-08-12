@@ -397,35 +397,35 @@
                 showGameResults(data);
             }
 
-            if ("SameCardAttempt" in data) {
-                if (data["SameCardAttempt"][4] !== "Success") {
-                    addCard(data["SameCardAttempt"][0]);
-                    if (data["SameCardAttempt"][0] in players) {
-                        createNotification(`${players[data["SameCardAttempt"][0]]} attempted to throw a diplicate unsuccessfully: ${data["SameCardAttempt"][4]}, receiving a penalty card`);
+            if ("DuplicateCardAttempt" in data) {
+                if (data["DuplicateCardAttempt"][4] !== "Success") {
+                    addCard(data["DuplicateCardAttempt"][0]);
+                    if (data["DuplicateCardAttempt"][0] in players) {
+                        createNotification(`${players[data["DuplicateCardAttempt"][0]]} attempted to throw a diplicate unsuccessfully: ${data["DuplicateCardAttempt"][4]}, receiving a penalty card`);
                     } else {
-                        createNotification(`You attempted to throw a duplicate unsuccessfully: ${data["SameCardAttempt"][4]}, receive a penalty card`);
+                        createNotification(`You attempted to throw a duplicate unsuccessfully: ${data["DuplicateCardAttempt"][4]}, receive a penalty card`);
                     }
                 } else {
-                    if (data["SameCardAttempt"][0] in players) {
-                        createNotification(`Player ${players[data["SameCardAttempt"][0]]} threw a duplicate successfully`);
+                    if (data["DuplicateCardAttempt"][0] in players) {
+                        createNotification(`Player ${players[data["DuplicateCardAttempt"][0]]} threw a duplicate successfully`);
                     } else {
                         createNotification(`You threw a duplicate successfully`);
                     }
 
-                    removeCard(data["SameCardAttempt"][1]);
-                    if (data["SameCardAttempt"][0] != data["SameCardAttempt"][1]) {
+                    removeCard(data["DuplicateCardAttempt"][1]);
+                    if (data["DuplicateCardAttempt"][0] != data["DuplicateCardAttempt"][1]) {
                         oldPowerState = powerState;
                         oldPowerContainerText = powerContainer.innerText;
 
-                        if (data["SameCardAttempt"][0] in players) {
+                        if (data["DuplicateCardAttempt"][0] in players) {
                             powerState = "WaitingForChoosingCardToGive";
-                            powerContainer.innerText = `PAUSE! Game will resume after ${data["SameCardAttempt"][0]} choose the card to substitute`;
+                            powerContainer.innerText = `PAUSE! Game will resume after ${data["DuplicateCardAttempt"][0]} choose the card to substitute`;
                         } else {
                             powerState = "ChoosingCardToGive";
                             powerContainer.innerText = "PICK ONE OF YOUR CARD TO SUBSTITUTE!";
                         }
                     }
-                    discardPile.src = getCardImage(data["SameCardAttempt"][3]);
+                    discardPile.src = getCardImage(data["DuplicateCardAttempt"][3]);
                 }
             }
             if ("CardReplaced" in data) {
